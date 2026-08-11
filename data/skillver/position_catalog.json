@@ -1,0 +1,350 @@
+[
+  {
+    "position_name": "机器学习工程师",
+    "job_intent_id": "J01",
+    "job_intent_label": "AI 算法工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "CV算法工程师",
+    "job_intent_id": "J01",
+    "job_intent_label": "AI 算法工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "智能搜索/推荐工程师",
+    "job_intent_id": "J01",
+    "job_intent_label": "AI 算法工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "预训练算法研究员/工程师",
+    "job_intent_id": "J02",
+    "job_intent_label": "AI 大模型工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "后训练与对齐工程师",
+    "job_intent_id": "J02",
+    "job_intent_label": "AI 大模型工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "推理优化工程师(算法层)",
+    "job_intent_id": "J02",
+    "job_intent_label": "AI 大模型工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "模型架构研究员",
+    "job_intent_id": "J02",
+    "job_intent_label": "AI 大模型工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "大模型评测与合成数据专家",
+    "job_intent_id": "J02",
+    "job_intent_label": "AI 大模型工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI应用工程师",
+    "job_intent_id": "J03",
+    "job_intent_label": "AI 应用开发工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "Agent工程师",
+    "job_intent_id": "J03",
+    "job_intent_label": "AI 应用开发工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "多模态/AIGC算法工程师",
+    "job_intent_id": "J04",
+    "job_intent_label": "AI 多模态工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "视频/数字人生成工程师",
+    "job_intent_id": "J04",
+    "job_intent_label": "AI 多模态工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "语音AI工程师(含合成)",
+    "job_intent_id": "J04",
+    "job_intent_label": "AI 多模态工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI数据工程师(管道/治理)",
+    "job_intent_id": "J05",
+    "job_intent_label": "AI 数据工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI数据质量工程师",
+    "job_intent_id": "J05",
+    "job_intent_label": "AI 数据工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI知识工程师",
+    "job_intent_id": "J05",
+    "job_intent_label": "AI 数据工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "MLOps/LLMOps工程师",
+    "job_intent_id": "J06",
+    "job_intent_label": "AI 基础设施 / MLOps",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "推理部署工程师(工程层)",
+    "job_intent_id": "J06",
+    "job_intent_label": "AI 基础设施 / MLOps",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI平台工程师",
+    "job_intent_id": "J06",
+    "job_intent_label": "AI 基础设施 / MLOps",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "GPU/算力调度工程师",
+    "job_intent_id": "J06",
+    "job_intent_label": "AI 基础设施 / MLOps",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI数据基建/特征平台",
+    "job_intent_id": "J06",
+    "job_intent_label": "AI 基础设施 / MLOps",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI成本工程师(FinOps)",
+    "job_intent_id": "J06",
+    "job_intent_label": "AI 基础设施 / MLOps",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI安全架构师",
+    "job_intent_id": "J08",
+    "job_intent_label": "AI 安全 / 合规工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "模型安全红队/对抗检测",
+    "job_intent_id": "J08",
+    "job_intent_label": "AI 安全 / 合规工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI治理/合规与风险",
+    "job_intent_id": "J08",
+    "job_intent_label": "AI 安全 / 合规工程师",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI产品经理(平台/商业)",
+    "job_intent_id": "J09",
+    "job_intent_label": "AI 产品经理",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "对话式/Agent产品经理",
+    "job_intent_id": "J09",
+    "job_intent_label": "AI 产品经理",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI业务分析师",
+    "job_intent_id": "J09",
+    "job_intent_label": "AI 产品经理",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI解决方案架构师",
+    "job_intent_id": "J10",
+    "job_intent_label": "AI 解决方案 / 售前",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI售前工程师",
+    "job_intent_id": "J10",
+    "job_intent_label": "AI 解决方案 / 售前",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI交付/前向部署工程师",
+    "job_intent_id": "J10",
+    "job_intent_label": "AI 解决方案 / 售前",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI商务拓展经理(含客户成功)",
+    "job_intent_id": "J11",
+    "job_intent_label": "AI 商业化 / 运营 / 销售",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI增长/市场营销经理",
+    "job_intent_id": "J11",
+    "job_intent_label": "AI 商业化 / 运营 / 销售",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI研究员/科学家",
+    "job_intent_id": "J99",
+    "job_intent_label": "其他 / 跨方向",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI技术项目经理",
+    "job_intent_id": "J99",
+    "job_intent_label": "其他 / 跨方向",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "AI自动化架构师",
+    "job_intent_id": "J99",
+    "job_intent_label": "其他 / 跨方向",
+    "industry": "IND-AI"
+  },
+  {
+    "position_name": "具身智能算法工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人感知算法工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人导航规划工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人运动控制工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "具身智能硬件工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人产品经理",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人系统架构师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人解决方案工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人项目经理",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "具身智能研究工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人AI产品工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人数据工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人基础平台工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "伺服驱动工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人安全系统工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机械臂结构设计工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人仿真与迁移工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人验证测试工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人执行器工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "机器人视觉传感器工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "灵巧手工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  },
+  {
+    "position_name": "触觉/力觉传感器工程师",
+    "job_intent_id": "J07",
+    "job_intent_label": "机器人 / 具身智能工程师",
+    "industry": "IND-ROBO"
+  }
+]

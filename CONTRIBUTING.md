@@ -1,20 +1,21 @@
-# 贡献指南
+# 本地开发与贡献指南
 
-感谢你对 boss-zhipin-scraper 的兴趣！无论是提 Issue、修 Bug 还是加功能，都欢迎。
+感谢你对 boss-zhipin-scraper 的兴趣！本项目默认采用**本地开发优先**的工作方式：修 Bug、加功能和补文档都可以直接在当前本地工作区完成，不以 GitHub Issue、分支、提交、推送或 Pull Request 为前置条件。
 
 ## 行为准则
 
 请保持友善、尊重。技术讨论对事不对人，不接受任何人身攻击或骚扰言论。
 
-## 在贡献之前
+## 开发之前
 
-- **先开 Issue 再写代码**：修 Bug 或加新功能前，请先在 [Issues](../../issues) 里搜索是否已有人提过；没有的话新开一个，简要说明你打算做什么，避免和别人重复劳动或方向跑偏。
-- **一个 PR 只做一件事**：混合多个改动的 PR 很难 review，请拆开。
+- 先阅读 `AGENTS.md` 和相关 README，确认当前主路径与文件边界。
+- 先检查本地工作树状态和相关 diff，保留已有修改，不覆盖、不回滚不属于当前任务的工作。
+- 将相互独立的改动拆成清晰的本地工作单元，分别补测试和文档，避免职责混杂。
+- 允许使用 `git status`、`git diff` 等只读命令保护现有工作。只有用户明确提出时，才创建 Issue、Fork、分支、提交、Push 或 Pull Request；这些操作都不是本地开发的前置条件。
 
 ## 开发环境
 
 ```bash
-git clone https://github.com/eatmoreduck/boss-zhipin-scraper.git
 cd boss-zhipin-scraper
 pip install -r requirements.txt          # 或 uv sync
 python3 -m unittest tests.test_chrome_setup   # 跑测试，确保全绿
@@ -32,7 +33,7 @@ python3 -m unittest tests.test_chrome_setup   # 跑测试，确保全绿
 ## 测试要求
 
 - 修了 Bug 或加功能，**必须补测试**。测试在 `tests/test_chrome_setup.py`，用标准库 `unittest`，通过 mock 掉 `requests`/`websocket`，**不需要真实 Chrome 或网络**。
-- 提 PR 前本地先跑通：
+- 完成本地修改前先跑通：
 
   ```bash
   python3 -m unittest tests.test_chrome_setup
@@ -40,9 +41,9 @@ python3 -m unittest tests.test_chrome_setup   # 跑测试，确保全绿
 
 - 涉及版本号改动，会触发 `VersionConsistencyTests`，确保 `scripts/boss_cdp_raw.py`、`pyproject.toml`、`SKILL.md`、`README.md` 四处版本一致。
 
-## 提交信息（Commit Message）
+## 可选的本地提交信息（Commit Message）
 
-使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式，参考现有提交历史：
+本地开发不要求必须创建提交。只有用户明确要求提交时，才使用 [Conventional Commits](https://www.conventionalcommits.org/) 格式，参考现有提交历史：
 
 ```
 <type>: <简短描述，中文或英文均可>
@@ -56,21 +57,23 @@ test: 测试          例: test: 补城市码去重校验
 chore: 杂项         例: chore: 升级依赖
 ```
 
-## Pull Request 流程
+## 本地开发流程
 
-1. Fork 仓库，从 `master` 拉一个新分支（`git checkout -b fix/city-code-typo`）。
-2. 改代码 → 补测试 → 本地跑通。
-3. 如果改了用户可见行为，更新 `README.md`；如果是有意义的变更，在 `CHANGELOG.md` 顶部加一条。
-4. 提交 PR，描述里写清楚：改了什么、为什么改、怎么测试的。
-5. 等待 review，有反馈就改，保持同一个 PR（不要关掉重开）。
+1. 检查当前工作树并识别已有修改的归属。
+2. 阅读相关代码、测试和文档，先确认行为再修改。
+3. 改代码并补全 mock 测试；不得依赖真实 Chrome 或网络。
+4. 如果改了用户可见行为，同步更新 `README.md` 与 `README.en.md`；有意义的变更更新 `CHANGELOG.md`。
+5. 运行相关测试和语法检查，最后报告修改文件、验证结果和剩余限制。
+
+本地分支、Git commit 以及所有 GitHub 操作均为可选项。除非用户在当前任务中明确要求，否则不要因为缺少 Issue、分支、提交、Push 或 PR 而暂停本地开发。
 
 ## 关于合规
 
-本项目通过复用用户**本人已登录的浏览器**抓取公开可见的职位数据，用于个人求职分析。提交代码时请不要加入任何大规模、无节制请求、或绕过平台安全校验的逻辑——这类改动不会被接受。请遵守目标网站的条款，对自己使用本工具的行为负责。
+本项目通过复用用户**本人已登录的浏览器**抓取公开可见的职位数据，用于个人求职分析。本地开发时请不要加入任何大规模、无节制请求或绕过平台安全校验的逻辑。请遵守目标网站的条款，对自己使用本工具的行为负责。
 
-## 有问题？
+## 本地开发遇到问题
 
-- Bug / 功能建议 → [Issues](../../issues)
-- 不确定怎么改 → 先开 Issue 讨论
+- 优先阅读 `AGENTS.md`、README、现有测试和报错信息。
+- 无法确认需求边界时，直接向用户询问；不要求创建 GitHub Issue。
 
-再次感谢你的贡献！
+需要 Issue、分支、提交、Push 或 Pull Request 时，由用户另行明确提出。

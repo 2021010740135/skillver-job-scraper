@@ -33,6 +33,16 @@ class ChromeSetupTests(unittest.TestCase):
         self.assertNotIn("/tmp/", module.DEFAULT_CDP_DATA_DIR)
         self.assertTrue(module.DEFAULT_CDP_DATA_DIR.endswith(".boss-zhipin-scraper/chrome-profile"))
 
+    def test_configure_stdio_utf8_requests_utf8_replace(self):
+        module = load_module()
+        stream = mock.Mock()
+        with mock.patch.object(module.sys, "stdout", stream), mock.patch.object(
+            module.sys, "stderr", stream
+        ):
+            module.configure_stdio_utf8()
+        stream.reconfigure.assert_called_with(encoding="utf-8", errors="replace")
+        self.assertEqual(stream.reconfigure.call_count, 2)
+
     def test_default_result_dir_is_persistent_user_state(self):
         module = load_module()
 
@@ -280,10 +290,19 @@ class ChromeSetupTests(unittest.TestCase):
         module = load_module()
 
         with mock.patch.object(sys, "argv", [
-                "boss_cdp_raw.py", "--city", "不存在市",
+                "boss_cdp_raw.py",
+                "--position-name", "机器学习工程师",
+                "--city", "不存在市",
         ]), \
              mock.patch.object(module, "require_runtime_dependencies",
                                return_value=True), \
+             mock.patch.object(module, "resolve_standard_position", return_value={
+                 "position_name": "机器学习工程师",
+                 "job_intent_id": "J01",
+                 "job_intent_label": "AI 算法工程师",
+             }), \
+             mock.patch.object(module, "load_skillver_seen",
+                               return_value={"version": 1, "jobs": {}}), \
              mock.patch.object(module, "resolve_city",
                                side_effect=module.CityResolutionError("无法解析城市")), \
              mock.patch.object(module, "check_login_state") as login_probe, \
@@ -509,6 +528,7 @@ class ChromeSetupTests(unittest.TestCase):
         self.assertEqual(detail["salary"], "30-60K")
         self.assertEqual(detail["salary_source"], "api")
         self.assertEqual(detail["boss_active_status"], "今日活跃")
+        self.assertEqual(detail["encrypt_job_id"], "abc")
 
     def test_detail_record_falls_back_to_list_active_status(self):
         module = load_module()
@@ -956,6 +976,19 @@ class ChromeSetupTests(unittest.TestCase):
                 [r"C:\Users\leon\.boss-zhipin-scraper\chrome-profile"],
             )
 
+    def test_unix_process_parsing_matches_user_data_dir_and_cdp_port(self):
+        module = load_module()
+        profile = "/tmp/boss-zhipin-scraper-chrome-profile"
+        ps_output = (
+            "789 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
+            f"--remote-debugging-port=9333 --user-data-dir={profile}\n"
+        )
+        with mock.patch.object(module.platform, "system", return_value="Darwin"), \
+                mock.patch.object(module.subprocess, "run", return_value=type("Completed", (), {"stdout": ps_output, "returncode": 0})()), \
+                mock.patch.object(module.os.path, "realpath", side_effect=lambda p: p):
+            self.assertEqual(module.chrome_pids_for_user_data_dir(profile), [789])
+            self.assertEqual(module.chrome_user_data_dirs_for_cdp_port(9333), [profile])
+
     def test_smoke_jobs_require_api_salary_and_link(self):
         module = load_module()
 
@@ -996,6 +1029,418 @@ class ChromeSetupTests(unittest.TestCase):
         self.assertEqual(rows[0]["salary_source"], "api")
         self.assertEqual(rows[0]["skill_tags"], "Python | LLM")
         self.assertEqual(rows[0]["jd"], "Build AI agents")
+
+    def test_is_headhunter_job_detects_title_and_hr_agency(self):
+        module = load_module()
+        self.assertTrue(module.is_headhunter_job({"boss_title": "猎头顾问"}))
+        self.assertTrue(module.is_headhunter_job({"boss_title": "Senior Headhunter"}))
+        self.assertTrue(
+            module.is_headhunter_job(
+                {"boss_title": "招聘经理", "company_industry": "人力资源服务"}
+            )
+        )
+        self.assertFalse(
+            module.is_headhunter_job(
+                {"boss_title": "HR", "boss_name": "得物App", "company_industry": "电子商务"}
+            )
+        )
+        self.assertFalse(
+            module.is_headhunter_job(
+                {"boss_title": "招聘经理", "company_industry": "互联网"}
+            )
+        )
+
+    def test_filter_out_headhunter_jobs_preserves_direct_hire_order(self):
+        module = load_module()
+        jobs = [
+            {"job_id": "h1", "boss_title": "猎头顾问"},
+            {"job_id": "d1", "boss_title": "HR"},
+            {"job_id": "h2", "boss_title": "Headhunter"},
+            {"job_id": "d2", "boss_title": "招聘专家"},
+            {"job_id": "a1", "boss_title": "招聘经理", "company_industry": "人力资源服务"},
+        ]
+        kept, removed = module.filter_out_headhunter_jobs(jobs)
+        self.assertEqual(removed, 3)
+        self.assertEqual([j["job_id"] for j in kept], ["d1", "d2"])
+
+    def test_filter_jobs_by_title_keeps_pm_drops_engineer(self):
+        module = load_module()
+        jobs = [
+            {"job_id": "1", "title": "27届校招-AI产品经理"},
+            {"job_id": "2", "title": "AI全栈工程师"},
+            {"job_id": "3", "title": "AI产品运营岗"},
+            {"job_id": "4", "title": "AI算法工程师"},
+            {"job_id": "5", "title": "初中语文老师"},
+            {"job_id": "6", "title": "产品经理"},
+        ]
+        kept, removed = module.filter_jobs_by_title(
+            jobs,
+            include_patterns=module.DEFAULT_PM_TITLE_INCLUDE,
+            exclude_patterns=module.DEFAULT_PM_TITLE_EXCLUDE,
+        )
+        self.assertEqual(removed, 3)
+        self.assertEqual([j["job_id"] for j in kept], ["1", "3", "6"])
+        self.assertFalse(
+            module.title_passes_filters(
+                "AI产品经理工程师",
+                module.DEFAULT_PM_TITLE_INCLUDE,
+                module.DEFAULT_PM_TITLE_EXCLUDE,
+            )
+        )
+
+    def test_scrape_details_applies_title_filter_before_max_details(self):
+        module = load_module()
+        session = mock.Mock()
+        navigated = []
+
+        def send(method, params=None, sid=None):
+            if method == "Target.createTarget":
+                return {"result": {"targetId": f"t-{len(navigated) + 1}"}}
+            if method == "Target.attachToTarget":
+                return {"result": {"sessionId": f"s-{len(navigated) + 1}"}}
+            if method == "Page.navigate":
+                navigated.append(params.get("url", ""))
+            return {}
+
+        session.send.side_effect = send
+        session.eval_js.side_effect = lambda script, sid: (
+            json.dumps({"jd": "岗位职责与要求至少十字以上的正文", "tags": []})
+            if script == module.EXTRACT_DETAIL_JS
+            else None
+        )
+        jobs = [
+            {
+                "job_id": "eng",
+                "title": "AI全栈工程师",
+                "boss_title": "HR",
+                "job_link": "https://www.zhipin.com/job_detail/eng.html",
+            },
+            {
+                "job_id": "pm",
+                "title": "AI产品经理-应届",
+                "boss_title": "HR",
+                "boss_name": "合合信息",
+                "job_link": "https://www.zhipin.com/job_detail/pm.html",
+            },
+        ]
+        with tempfile_profile() as paths:
+            output = paths["cdp_profile"] / "details.json"
+            with mock.patch.object(module, "CDPSession", return_value=session), \
+                    mock.patch.object(module.time, "sleep"), \
+                    mock.patch.object(module, "extract_detail_fields", return_value={
+                        "jd": "岗位职责与要求至少十字以上的正文",
+                        "boss_active_status": "",
+                    }), \
+                    mock.patch.object(module, "incr_request"):
+                results = module.scrape_details(
+                    {"jobs": jobs},
+                    max_details=1,
+                    output_path=str(output),
+                    title_include=list(module.DEFAULT_PM_TITLE_INCLUDE),
+                    title_exclude=list(module.DEFAULT_PM_TITLE_EXCLUDE),
+                )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["job_id"], "pm")
+        self.assertIn("pm.html", navigated[0])
+
+    def test_resolve_title_filters_from_args_pm_preset(self):
+        module = load_module()
+        args = mock.Mock(
+            title_include=None,
+            title_exclude=None,
+            title_filter_pm=True,
+        )
+        include, exclude = module.resolve_title_filters_from_args(args)
+        self.assertEqual(include, list(module.DEFAULT_PM_TITLE_INCLUDE))
+        self.assertEqual(exclude, list(module.DEFAULT_PM_TITLE_EXCLUDE))
+
+        args = mock.Mock(
+            title_include="产品经理",
+            title_exclude="工程师",
+            title_filter_pm=True,
+        )
+        include, exclude = module.resolve_title_filters_from_args(args)
+        self.assertEqual(include, ["产品经理"])
+        self.assertEqual(exclude, ["工程师"])
+
+    def test_scrape_details_filters_headhunters_before_max_details(self):
+        module = load_module()
+        session = mock.Mock()
+        navigated = []
+
+        def send(method, params=None, sid=None):
+            if method == "Target.createTarget":
+                return {"result": {"targetId": f"target-{len(navigated) + 1}"}}
+            if method == "Target.attachToTarget":
+                return {"result": {"sessionId": f"session-{len(navigated) + 1}"}}
+            if method == "Page.navigate":
+                navigated.append(params.get("url", ""))
+            return {}
+
+        session.send.side_effect = send
+        session.eval_js.side_effect = lambda script, sid: (
+            json.dumps({"jd": "岗位职责与要求至少十字以上的正文", "tags": ["Python"]})
+            if script == module.EXTRACT_DETAIL_JS
+            else None
+        )
+        jobs = [
+            {
+                "job_id": "hunt",
+                "title": "猎头岗位",
+                "boss_title": "猎头顾问",
+                "job_link": "https://www.zhipin.com/job_detail/hunt.html",
+            },
+            {
+                "job_id": "direct",
+                "title": "直招岗位",
+                "boss_title": "HR",
+                "boss_name": "得物App",
+                "job_link": "https://www.zhipin.com/job_detail/direct.html",
+            },
+            {
+                "job_id": "direct2",
+                "title": "直招岗位2",
+                "boss_title": "招聘专家",
+                "job_link": "https://www.zhipin.com/job_detail/direct2.html",
+            },
+        ]
+
+        with tempfile_profile() as paths:
+            output = paths["cdp_profile"] / "details.json"
+            with mock.patch.object(module, "CDPSession", return_value=session), \
+                    mock.patch.object(module.time, "sleep"), \
+                    mock.patch.object(module, "extract_detail_fields", return_value={
+                        "jd": "岗位职责与要求至少十字以上的正文",
+                        "boss_active_status": "",
+                    }), \
+                    mock.patch.object(module, "incr_request"):
+                results = module.scrape_details(
+                    {"jobs": jobs},
+                    max_details=1,
+                    output_path=str(output),
+                )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["job_id"], "direct")
+        self.assertEqual(len(navigated), 1)
+        self.assertIn("direct.html", navigated[0])
+
+    def test_resolve_encrypt_job_id_prefers_field_then_link(self):
+        module = load_module()
+        self.assertEqual(
+            module.resolve_encrypt_job_id({"encrypt_job_id": "eid-1"}),
+            "eid-1",
+        )
+        self.assertEqual(
+            module.resolve_encrypt_job_id(
+                {"job_link": "https://www.zhipin.com/job_detail/eid-from-link.html"}
+            ),
+            "eid-from-link",
+        )
+
+    def test_load_seen_encrypt_job_ids_only_from_detail_files(self):
+        module = load_module()
+        with tempfile_profile() as paths:
+            raw_dir = paths["cdp_profile"] / "raw"
+            raw_dir.mkdir(parents=True, exist_ok=True)
+            (raw_dir / "boss_details_a.json").write_text(
+                json.dumps([
+                    {
+                        "encrypt_job_id": "seen-1",
+                        "jd": "已抓详情",
+                    },
+                    {
+                        "job_link": "https://www.zhipin.com/job_detail/seen-2.html",
+                        "jd": "从 link 解析",
+                    },
+                ]),
+                encoding="utf-8",
+            )
+            (raw_dir / "boss_jobs_a.json").write_text(
+                json.dumps({"jobs": [{"encrypt_job_id": "list-only-not-seen"}]}),
+                encoding="utf-8",
+            )
+            seen = module.load_seen_encrypt_job_ids([str(raw_dir)])
+        self.assertEqual(seen, {"seen-1", "seen-2"})
+
+    def test_filter_jobs_missing_details_skips_seen_encrypt_ids(self):
+        module = load_module()
+        jobs = [
+            {"encrypt_job_id": "seen-1", "boss_title": "HR"},
+            {"encrypt_job_id": "new-1", "boss_title": "HR"},
+            {
+                "job_link": "https://www.zhipin.com/job_detail/seen-2.html",
+                "boss_title": "HR",
+            },
+        ]
+        kept, skipped = module.filter_jobs_missing_details(
+            jobs, {"seen-1", "seen-2"}
+        )
+        self.assertEqual(skipped, 2)
+        self.assertEqual([j["encrypt_job_id"] for j in kept], ["new-1"])
+
+    def test_scrape_details_skips_seen_encrypt_ids_before_max_details(self):
+        module = load_module()
+        session = mock.Mock()
+        navigated = []
+
+        def send(method, params=None, sid=None):
+            if method == "Target.createTarget":
+                return {"result": {"targetId": f"t-{len(navigated) + 1}"}}
+            if method == "Target.attachToTarget":
+                return {"result": {"sessionId": f"s-{len(navigated) + 1}"}}
+            if method == "Page.navigate":
+                navigated.append(params.get("url", ""))
+            return {}
+
+        session.send.side_effect = send
+        session.eval_js.side_effect = lambda script, sid: (
+            json.dumps({"jd": "岗位职责与要求至少十字以上的正文", "tags": []})
+            if script == module.EXTRACT_DETAIL_JS
+            else None
+        )
+        jobs = [
+            {
+                "job_id": "old",
+                "encrypt_job_id": "already",
+                "title": "旧岗",
+                "boss_title": "HR",
+                "job_link": "https://www.zhipin.com/job_detail/already.html",
+            },
+            {
+                "job_id": "new",
+                "encrypt_job_id": "fresh",
+                "title": "新岗",
+                "boss_title": "HR",
+                "boss_name": "得物App",
+                "job_link": "https://www.zhipin.com/job_detail/fresh.html",
+            },
+        ]
+        seen = {"already"}
+        with tempfile_profile() as paths:
+            output = paths["cdp_profile"] / "details.json"
+            with mock.patch.object(module, "CDPSession", return_value=session), \
+                    mock.patch.object(module.time, "sleep"), \
+                    mock.patch.object(module, "extract_detail_fields", return_value={
+                        "jd": "岗位职责与要求至少十字以上的正文",
+                        "boss_active_status": "",
+                    }), \
+                    mock.patch.object(module, "incr_request"):
+                results = module.scrape_details(
+                    {"jobs": jobs},
+                    max_details=1,
+                    output_path=str(output),
+                    seen_encrypt_job_ids=seen,
+                )
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["encrypt_job_id"], "fresh")
+        self.assertIn("fresh", seen)
+        self.assertEqual(len(navigated), 1)
+        self.assertIn("fresh.html", navigated[0])
+
+    def test_load_keywords_file_and_position_gap_helpers(self):
+        module = load_module()
+        with tempfile_profile() as paths:
+            paths["cdp_profile"].mkdir(parents=True, exist_ok=True)
+            path = paths["cdp_profile"] / "batch.json"
+            path.write_text(
+                json.dumps({"keywords": ["岗A", "岗B", "岗C"]}),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                module.load_keywords_file(str(path)),
+                ["岗A", "岗B", "岗C"],
+            )
+            too_many = paths["cdp_profile"] / "too_many.json"
+            too_many.write_text(
+                json.dumps([f"k{i}" for i in range(module.MAX_BATCH_KEYWORDS + 1)]),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ValueError):
+                module.load_keywords_file(str(too_many))
+
+        self.assertEqual(module.parse_position_gap("480-900"), (480, 900))
+        self.assertEqual(module.parse_position_gap("600"), (600, 600))
+        self.assertEqual(module.parse_position_gap(None), module.DEFAULT_POSITION_GAP_SEC)
+        slept = []
+        delay = module.sleep_between_positions((0, 0), sleeper=slept.append)
+        self.assertEqual(delay, 0.0)
+        self.assertEqual(slept, [])
+        delay = module.sleep_between_positions((10, 10), sleeper=slept.append)
+        self.assertEqual(delay, 10.0)
+        self.assertEqual(slept, [10.0])
+
+    def test_run_keyword_batch_sleeps_between_positions_without_cdp(self):
+        module = load_module()
+        sleeps = []
+        scrape_calls = []
+
+        def fake_scrape_list(keyword, city, pages, filters, output_path, **kwargs):
+            scrape_calls.append(("list", keyword, output_path))
+            pathlib.Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            pathlib.Path(output_path).write_text(
+                json.dumps({"keyword": keyword, "jobs": []}),
+                encoding="utf-8",
+            )
+            return {"keyword": keyword, "jobs": []}
+
+        def fake_scrape_details(list_data, max_details, output_path, **kwargs):
+            scrape_calls.append(("detail", list_data.get("keyword"), output_path))
+            return []
+
+        with tempfile_profile() as paths:
+            out_dir = paths["cdp_profile"] / "raw"
+            with mock.patch.object(module, "scrape_list", side_effect=fake_scrape_list), \
+                    mock.patch.object(module, "scrape_details", side_effect=fake_scrape_details):
+                module.run_keyword_batch(
+                    ["岗A", "岗B"],
+                    city="上海",
+                    pages=1,
+                    filters={"scale": "305"},
+                    output_dir=str(out_dir),
+                    max_details=5,
+                    position_gap=(0, 0),
+                    detail=True,
+                    sleeper=lambda seconds: sleeps.append(seconds),
+                )
+            self.assertEqual([c[0] for c in scrape_calls], ["list", "list"])
+            self.assertEqual(sleeps, [])
+            self.assertTrue((out_dir / "boss_jobs_01_岗A.json").exists())
+            self.assertTrue((out_dir / "boss_jobs_02_岗B.json").exists())
+
+        sleeps.clear()
+        scrape_calls.clear()
+
+        def scrape_list_with_jobs(keyword, city, pages, filters, output_path, **kwargs):
+            scrape_calls.append(("list", keyword))
+            return {
+                "keyword": keyword,
+                "jobs": [{
+                    "encrypt_job_id": f"{keyword}-id",
+                    "boss_title": "HR",
+                    "job_link": f"https://www.zhipin.com/job_detail/{keyword}.html",
+                }],
+            }
+
+        with tempfile_profile() as paths:
+            out_dir = paths["cdp_profile"] / "raw2"
+            with mock.patch.object(module, "scrape_list", side_effect=scrape_list_with_jobs), \
+                    mock.patch.object(module, "scrape_details", side_effect=fake_scrape_details):
+                module.run_keyword_batch(
+                    ["岗A", "岗B", "岗C"],
+                    city="上海",
+                    pages=1,
+                    filters={},
+                    output_dir=str(out_dir),
+                    max_details=5,
+                    position_gap=(3, 3),
+                    sleeper=lambda seconds: sleeps.append(seconds),
+                )
+            self.assertEqual(
+                [c[0] for c in scrape_calls],
+                ["list", "detail", "list", "detail", "list", "detail"],
+            )
+            self.assertEqual(sleeps, [3.0, 3.0])
 
     def test_scrape_details_final_save_handles_bare_filename(self):
         """--detail-output 传不带目录的裸文件名时，最终保存不应崩溃。
@@ -1118,13 +1563,14 @@ class ChromeSetupTests(unittest.TestCase):
         fake_requests.get.return_value = type("Resp", (), {"status_code": 200})()
 
         with tempfile_profile() as paths:
-            ps_output = (
-                "123 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
-                "--remote-debugging-port=9333 --user-data-dir=/tmp/chrome-cdp-data\n"
-            )
+            # Mock 进程枚举层，避免依赖 Windows PowerShell / Unix ps 输出格式
+            processes = [(
+                123,
+                "chrome --remote-debugging-port=9333 --user-data-dir=/tmp/chrome-cdp-data",
+            )]
             with mock.patch.object(module, "DEFAULT_CDP_DATA_DIR", str(paths["cdp_profile"])), \
                     mock.patch.object(module, "requests", fake_requests), \
-                    mock.patch.object(module.subprocess, "run", return_value=type("Completed", (), {"stdout": ps_output, "returncode": 0})()), \
+                    mock.patch.object(module, "iter_chrome_process_commands", return_value=processes), \
                     mock.patch.object(module.subprocess, "Popen") as popen:
                 self.assertEqual(module.run_setup_chrome(cdp_port=9333), 1)
 
@@ -1136,13 +1582,13 @@ class ChromeSetupTests(unittest.TestCase):
         fake_requests.get.return_value = type("Resp", (), {"status_code": 200})()
 
         with tempfile_profile() as paths:
-            ps_output = (
-                "123 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
-                f"--remote-debugging-port=9333 --user-data-dir={paths['cdp_profile']}\n"
-            )
+            processes = [(
+                123,
+                f"chrome --remote-debugging-port=9333 --user-data-dir={paths['cdp_profile']}",
+            )]
             with mock.patch.object(module, "DEFAULT_CDP_DATA_DIR", str(paths["cdp_profile"])), \
                     mock.patch.object(module, "requests", fake_requests), \
-                    mock.patch.object(module.subprocess, "run", return_value=type("Completed", (), {"stdout": ps_output, "returncode": 0})()), \
+                    mock.patch.object(module, "iter_chrome_process_commands", return_value=processes), \
                     mock.patch.object(module.subprocess, "Popen") as popen, \
                     mock.patch.object(module, "wait_for_login", return_value=True) as wait_login:
                 self.assertEqual(module.run_setup_chrome(cdp_port=9333), 0)
@@ -1156,13 +1602,13 @@ class ChromeSetupTests(unittest.TestCase):
         fake_requests.get.return_value = type("Resp", (), {"status_code": 200})()
 
         with tempfile_profile() as paths:
-            ps_output = (
-                "123 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
-                f"--remote-debugging-port=9333 --user-data-dir={paths['cdp_profile']}\n"
-            )
+            processes = [(
+                123,
+                f"chrome --remote-debugging-port=9333 --user-data-dir={paths['cdp_profile']}",
+            )]
             with mock.patch.object(module, "DEFAULT_CDP_DATA_DIR", str(paths["cdp_profile"])), \
                     mock.patch.object(module, "requests", fake_requests), \
-                    mock.patch.object(module.subprocess, "run", return_value=type("Completed", (), {"stdout": ps_output, "returncode": 0})()), \
+                    mock.patch.object(module, "iter_chrome_process_commands", return_value=processes), \
                     mock.patch.object(module, "wait_for_login") as wait_login:
                 self.assertEqual(module.run_setup_chrome(cdp_port=9333, wait_login=False), 0)
 
@@ -1172,13 +1618,19 @@ class ChromeSetupTests(unittest.TestCase):
         module = load_module()
 
         with tempfile_profile() as paths:
-            ps_output = (
-                "123 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
-                f"--remote-debugging-port=9333 --user-data-dir={paths['cdp_profile']}\n"
-                "456 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
-                "--remote-debugging-port=9334 --user-data-dir=/tmp/other-profile\n"
-            )
-            with mock.patch.object(module.subprocess, "run", return_value=type("Completed", (), {"stdout": ps_output, "returncode": 0})()):
+            # 跨平台：直接提供 (pid, command) ，覆盖 user-data-dir / CDP 端口匹配
+            # （Windows JSON / Unix ps 解析分别由对应平台用例覆盖）
+            processes = [
+                (
+                    123,
+                    f"chrome --remote-debugging-port=9333 --user-data-dir={paths['cdp_profile']}",
+                ),
+                (
+                    456,
+                    "chrome --remote-debugging-port=9334 --user-data-dir=/tmp/other-profile",
+                ),
+            ]
+            with mock.patch.object(module, "iter_chrome_process_commands", return_value=processes):
                 self.assertEqual(module.chrome_pids_for_user_data_dir(str(paths["cdp_profile"])), [123])
                 self.assertEqual(module.chrome_user_data_dirs_for_cdp_port(9333), [str(paths["cdp_profile"])])
                 self.assertTrue(module.cdp_port_uses_profile(9333, str(paths["cdp_profile"])))
@@ -1272,6 +1724,8 @@ class ChromeSetupTests(unittest.TestCase):
             [sys.executable, str(SCRIPT_PATH), "--help"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
 
@@ -1282,6 +1736,278 @@ class ChromeSetupTests(unittest.TestCase):
         self.assertIn("--login-timeout", result.stdout)
         self.assertIn("--stop-chrome", result.stdout)
         self.assertIn("--close-chrome", result.stdout)
+        self.assertIn("--position-name", result.stdout)
+
+    def test_resolve_standard_position_unknown_exits(self):
+        module = load_module()
+        catalog_path = SCRIPT_PATH.parents[1] / "data" / "skillver" / "position_catalog.json"
+        with self.assertRaises(SystemExit) as ctx:
+            module.resolve_standard_position(
+                "完全不存在的标准岗",
+                catalog_path=str(catalog_path),
+            )
+        self.assertIn("unknown", str(ctx.exception))
+
+    def test_main_requires_position_name_for_scrape(self):
+        module = load_module()
+        with mock.patch.object(sys, "argv", ["boss_cdp_raw.py", "--city", "上海"]), \
+                mock.patch.object(module, "require_runtime_dependencies",
+                                  return_value=True), \
+                redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit) as exit_context:
+                module.main()
+        self.assertEqual(exit_context.exception.code, 1)
+        self.assertIn("--position-name", output.getvalue())
+
+    def test_main_rejects_keywords_file_as_legacy(self):
+        module = load_module()
+        with mock.patch.object(sys, "argv", [
+                "boss_cdp_raw.py",
+                "--keywords-file", "data/_legacy/batches/batch01.json",
+                "--position-name", "机器学习工程师",
+        ]), \
+                mock.patch.object(module, "require_runtime_dependencies",
+                                  return_value=True), \
+                redirect_stdout(io.StringIO()) as output:
+            with self.assertRaises(SystemExit) as exit_context:
+                module.main()
+        self.assertEqual(exit_context.exception.code, 1)
+        self.assertIn("legacy", output.getvalue().lower())
+
+    def test_scrape_details_skips_seen_has_details_and_writes_exported_false(self):
+        module = load_module()
+        session = mock.Mock()
+        navigated = []
+
+        def send(method, params=None, sid=None):
+            if method == "Target.createTarget":
+                return {"result": {"targetId": f"t-{len(navigated) + 1}"}}
+            if method == "Target.attachToTarget":
+                return {"result": {"sessionId": f"s-{len(navigated) + 1}"}}
+            if method == "Page.navigate":
+                navigated.append(params.get("url", ""))
+            return {}
+
+        session.send.side_effect = send
+        session.eval_js.side_effect = lambda script, sid: (
+            json.dumps({"jd": "岗位职责与要求至少十字以上的正文", "tags": []})
+            if script == module.EXTRACT_DETAIL_JS
+            else None
+        )
+        position = {
+            "position_name": "预训练算法研究员/工程师",
+            "job_intent_id": "J02",
+            "job_intent_label": "AI 大模型工程师",
+        }
+        jobs = [
+            {
+                "job_id": "old",
+                "encrypt_job_id": "enc-old",
+                "title": "已抓过",
+                "boss_name": "旧司",
+                "boss_title": "HR",
+                "job_link": "https://www.zhipin.com/job_detail/enc-old.html",
+            },
+            {
+                "job_id": "new",
+                "encrypt_job_id": "enc-new",
+                "title": "新岗位",
+                "boss_name": "新司",
+                "boss_title": "HR",
+                "salary": "40-70K",
+                "job_link": "https://www.zhipin.com/job_detail/enc-new.html",
+            },
+        ]
+        with tempfile_profile() as paths:
+            output = paths["cdp_profile"] / "details.json"
+            seen_path = paths["cdp_profile"] / "seen_jobs.json"
+            skillver_seen = {
+                "version": 1,
+                "jobs": {
+                    "enc-old": {
+                        "job_id": "old",
+                        "position_name": position["position_name"],
+                        "has_details": True,
+                        "exported": False,
+                        "first_seen_at": "2026-08-01T00:00:00+00:00",
+                        "exported_at": None,
+                    }
+                },
+            }
+            seen_ids = module.skillver_seen_detail_ids(skillver_seen)
+            with mock.patch.object(module, "CDPSession", return_value=session), \
+                    mock.patch.object(module.time, "sleep"), \
+                    mock.patch.object(module, "extract_detail_fields", return_value={
+                        "jd": "岗位职责与要求至少十字以上的正文",
+                        "boss_active_status": "",
+                    }), \
+                    mock.patch.object(module, "incr_request"):
+                results = module.scrape_details(
+                    {"jobs": jobs},
+                    max_details=5,
+                    output_path=str(output),
+                    seen_encrypt_job_ids=seen_ids,
+                    position_binding=position,
+                    skillver_seen=skillver_seen,
+                    skillver_seen_path=str(seen_path),
+                )
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["encrypt_job_id"], "enc-new")
+            self.assertEqual(results[0]["position_name"], position["position_name"])
+            self.assertEqual(results[0]["job_intent_id"], "J02")
+            self.assertEqual(len(navigated), 1)
+            self.assertIn("enc-new.html", navigated[0])
+
+            persisted = json.loads(seen_path.read_text(encoding="utf-8"))
+            self.assertTrue(persisted["jobs"]["enc-new"]["has_details"])
+            self.assertFalse(persisted["jobs"]["enc-new"]["exported"])
+            self.assertEqual(
+                persisted["jobs"]["enc-new"]["position_name"],
+                position["position_name"],
+            )
+
+    def test_build_detail_record_binds_standard_position(self):
+        module = load_module()
+        job = {
+            "job_id": "abc123",
+            "encrypt_job_id": "enc-abc",
+            "title": "随便标题",
+            "boss_name": "Acme",
+            "salary": "30-60K",
+            "salary_source": "api",
+            "location": "上海",
+            "tags": "3-5年 | 本科",
+            "job_link": "https://www.zhipin.com/job_detail/enc-abc.html",
+        }
+        detail = module.build_detail_record(
+            job,
+            {"tags": ["Python"], "jd": "Build models", "boss_active_status": ""},
+            position={
+                "position_name": "机器学习工程师",
+                "job_intent_id": "J01",
+                "job_intent_label": "AI 算法工程师",
+            },
+        )
+        self.assertEqual(detail["position_name"], "机器学习工程师")
+        self.assertEqual(detail["job_intent_id"], "J01")
+        self.assertEqual(detail["job_intent_label"], "AI 算法工程师")
+
+
+class SkillverMatchFilterTests(unittest.TestCase):
+    """Non-LLM filters still used before Agent classify."""
+
+    def test_is_obvious_non_entity_headhunter(self):
+        module = load_module()
+        ok, reason = module.is_obvious_non_entity_recruiter({
+            "title": "机器学习工程师",
+            "boss_name": "某某猎头",
+            "boss_title": "高级猎头顾问",
+            "company_industry": "人力资源服务",
+        })
+        self.assertTrue(ok)
+        self.assertIn("headhunter", reason)
+
+    def test_scrape_list_stops_when_on_page_returns_false(self):
+        module = load_module()
+        session = mock.Mock()
+        calls = {"n": 0}
+
+        def on_page(page_num, page_jobs, all_jobs):
+            calls["n"] += 1
+            return False
+
+        with mock.patch.object(module, "CDPSession", return_value=session), \
+                mock.patch.object(module, "create_page_session",
+                                  return_value=("tid", "sid")), \
+                mock.patch.object(module, "resolve_city",
+                                  return_value=("上海", "101020100")), \
+                mock.patch.object(module.time, "sleep"), \
+                mock.patch.object(module, "incr_request"), \
+                mock.patch.object(module, "flush_jobs"), \
+                mock.patch.object(
+                    module, "parse_api_jobs_eval_value",
+                    side_effect=lambda val: [{
+                        "title": "机器学习工程师",
+                        "job_link": "https://www.zhipin.com/job_detail/p1.html",
+                        "boss_name": "真实科技",
+                        "boss_title": "HR",
+                        "salary": "20-40K",
+                        "location": "上海",
+                    }],
+                ), \
+                redirect_stdout(io.StringIO()):
+            module.scrape_list(
+                "机器学习工程师",
+                "上海",
+                3,
+                {},
+                None,
+                on_page=on_page,
+            )
+
+        self.assertEqual(calls["n"], 1)
+
+    def test_main_list_only_mode_caps_pages(self):
+        module = load_module()
+        captured = {}
+
+        def fake_list_only(**kwargs):
+            captured.update(kwargs)
+            return {
+                "list_data": {"keyword": "x", "city": "上海", "total": 0, "jobs": []},
+                "classify_input_path": "x.json",
+                "classify_input": {},
+                "candidates": [],
+            }
+
+        position = {
+            "position_name": "机器学习工程师",
+            "job_intent_id": "J01",
+            "job_intent_label": "AI 算法工程师",
+        }
+        with tempfile_profile() as paths:
+            with mock.patch.object(sys, "argv", [
+                    "boss_cdp_raw.py",
+                    "--position-name", "机器学习工程师",
+                    "--city", "上海",
+                    "--list-only",
+                    "--pages", "10",
+                    "--min-details", "80",
+                    "--catalog", str(
+                        SCRIPT_PATH.parents[1]
+                        / "data" / "skillver" / "position_catalog.json"
+                    ),
+                    "--seen", str(paths["cdp_profile"] / "seen.json"),
+                    "--output", str(paths["cdp_profile"] / "jobs.json"),
+                ]), \
+                    mock.patch.object(module, "require_runtime_dependencies",
+                                      return_value=True), \
+                    mock.patch.object(module, "resolve_city",
+                                      return_value=("上海", "101020100")), \
+                    mock.patch.object(module, "ensure_scrape_login",
+                                      return_value=True), \
+                    mock.patch.object(module, "resolve_standard_position",
+                                      return_value=position), \
+                    mock.patch.object(module, "load_position_catalog",
+                                      return_value=[position]), \
+                    mock.patch.object(module, "load_skillver_seen",
+                                      return_value={"version": 2, "jobs": {},
+                                                    "by_position": {}}), \
+                    mock.patch.object(module, "skillver_seen_detail_ids",
+                                      return_value=set()), \
+                    mock.patch.object(module, "load_seen_encrypt_job_ids",
+                                      return_value=set()), \
+                    mock.patch.object(
+                        module, "run_skillver_list_only_batch",
+                        side_effect=fake_list_only,
+                    ), \
+                    redirect_stdout(io.StringIO()) as output:
+                module.main()
+
+            self.assertEqual(captured["max_pages"], module.DEFAULT_SKILLVER_MAX_PAGES)
+            self.assertIn("标准岗模式页数上限", output.getvalue())
+            self.assertIn("超过上限", output.getvalue())
 
 
 class tempfile_profile:
@@ -1375,7 +2101,7 @@ class VersionConsistencyTests(unittest.TestCase):
 
 
 class ProjectScopeTests(unittest.TestCase):
-    """项目边界守卫：只保留抓取和聚合分析，不内置简历匹配打分。"""
+    """项目边界守卫：最小集仅抓取+导出，不内置简历匹配打分或非核心旁路脚本。"""
 
     def _read_text(self, name):
         return (ROOT_PATH / name).read_text(encoding="utf-8")
@@ -1406,6 +2132,36 @@ class ProjectScopeTests(unittest.TestCase):
             "enable-llm",
         ):
             self.assertNotIn(forbidden, combined)
+
+    def test_non_core_scripts_are_not_packaged(self):
+        for name in (
+            "job_summary.py",
+            "job_analyze.py",
+            "enrich_company_uscc.py",
+            "evaluate_skillver_p6.py",
+        ):
+            self.assertFalse(
+                (ROOT_PATH / "scripts" / name).exists(),
+                f"非核心脚本不应保留: scripts/{name}",
+            )
+        for name in (
+            "test_job_summary.py",
+            "test_job_analyze.py",
+            "test_enrich_company_uscc.py",
+            "test_evaluate_skillver_p6.py",
+        ):
+            self.assertFalse(
+                (ROOT_PATH / "tests" / name).exists(),
+                f"非核心测试不应保留: tests/{name}",
+            )
+        pyproject = self._read_text("pyproject.toml")
+        for entry in (
+            "boss-summary",
+            "boss-analyze",
+            "boss-enrich-uscc",
+            "boss-evaluate-skillver",
+        ):
+            self.assertNotIn(entry, pyproject)
 
 
 if __name__ == "__main__":

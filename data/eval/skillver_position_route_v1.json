@@ -1,0 +1,745 @@
+{
+  "schema_version": 1,
+  "dataset_id": "skillver_position_route_v1",
+  "task": "list_to_catalog_or_reject",
+  "catalog_ref": "data/skillver/position_catalog.json",
+  "label_policy": "references/company-job-match.md",
+  "metrics_primary": [
+    "false_positive_rate",
+    "precision_at_accept"
+  ],
+  "notes": "gold_* 中 label_status=draft 为 Agent 初稿，须人工改为 human 后才可作为正式金标。",
+  "items": [
+    {
+      "id": "9b638b95f406a54203R_3926GVRR",
+      "title": "Golang",
+      "tags": "在校/应届 | 本科|Golang",
+      "salary": "28-55K·16薪",
+      "boss_title": "Team Leader",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 15,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "89a176c0211c4e7d0nJ-0tS6E1pX",
+      "title": "国内增长投放专家",
+      "tags": "3-5年 | 本科",
+      "salary": "25-50K·15薪",
+      "boss_title": "人事招聘专员",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 10,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "416c551e2808896c0nF_0tq8EFNT",
+      "title": "【急急急急】Agent测试开发工程师-支付",
+      "tags": "3-5年 | 本科",
+      "salary": "30-60K·16薪",
+      "boss_title": "招聘者",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 88,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "33214a22e4b07b8e0nB52N-8FFJX",
+      "title": "AI全栈工程师（Agent方向）",
+      "tags": "经验不限 | 本科|Python | Golang | Java | Docker | MySQL | 分布式经验 | AI | Agent | LLM",
+      "salary": "35-55K·16薪",
+      "boss_title": "服务端研发工程师",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 86,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "8a51557d3fe758070nBz2Ni1GFJY",
+      "title": "AGI研发",
+      "tags": "经验不限 | 本科",
+      "salary": "40-70K·16薪",
+      "boss_title": "招聘者",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "预训练算法研究员/工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 75,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "6c30b510a7e6fd380nF52N61FVFS",
+      "title": "公共事务 (A74859)",
+      "tags": "1-3年 | 硕士",
+      "salary": "20-30K·15薪",
+      "boss_title": "HR",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 5,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "f55c1d13a69945220nJ-09u1GFFY",
+      "title": "前端开发工程师-开放平台",
+      "tags": "3-5年 | 本科",
+      "salary": "40-70K·16薪",
+      "boss_title": "HR",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 25,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "fdfb71ef47a5553c0nJ63tW6FlpS",
+      "title": "云原生平台开发工程师-2027届",
+      "tags": "在校/应届 | 本科",
+      "salary": "30-60K·16薪",
+      "boss_title": "HR",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 35,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "f3ca8ff31f841dc603170tq_FlZS",
+      "title": "内容运营",
+      "tags": "3-5年 | 本科",
+      "salary": "20-35K·15薪",
+      "boss_title": "HRBP",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 8,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "0d4638f06b7f08b00nB_3Ni-EVNS",
+      "title": "大模型训练系统工程师",
+      "tags": "经验不限 | 本科",
+      "salary": "40-70K",
+      "boss_title": "HR",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "MLOps/LLMOps工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 80,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "fbfd9d0e922701ef0nF82920EFRT",
+      "title": "K8S开发工程师-容器网络",
+      "tags": "1-3年 | 硕士",
+      "salary": "40-70K·15薪",
+      "boss_title": "招聘者",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 30,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "d096440d98f5d7e00nB-3di9FFNT",
+      "title": "大模型研发工程师-K8s",
+      "tags": "3-5年 | 本科",
+      "salary": "40-70K·15薪",
+      "boss_title": "HR.招聘专员",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "MLOps/LLMOps工程师",
+      "gold_reject": false,
+      "label_status": "draft",
+      "draft_score": 78,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "3f2e70e07ec9a4930nd-3Nm0EVNW",
+      "title": "大模型技术销售工程师",
+      "tags": "3-5年 | 本科",
+      "salary": "25-40K",
+      "boss_title": "招聘经理",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "AI售前工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 84,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "6604d218691a24a803V72N-4FlBQ",
+      "title": "后端工程师",
+      "tags": "经验不限 | 本科",
+      "salary": "30-60K·16薪",
+      "boss_title": "HR",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 18,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "05ba81ade25db9270nd929W8EVRW",
+      "title": "生物信息学计算数据专家（AI训练方向）",
+      "tags": "3-5年 | 本科",
+      "salary": "50-80K·16薪",
+      "boss_title": "招聘者",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 40,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "f4e47e19fdd78a5d0nZ-09W7EVFX",
+      "title": "大模型算法工程师",
+      "tags": "经验不限 | 本科",
+      "salary": "70-100K·16薪",
+      "boss_title": "招聘者",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "预训练算法研究员/工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 90,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "7c0d9e7a1d0b84bd0nF82du7EVFT",
+      "title": "AI评测工程师",
+      "tags": "经验不限 | 本科",
+      "salary": "40-70K·16薪",
+      "boss_title": "招聘者",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "大模型评测与合成数据专家",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 90,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "f06797c5773b297603F73dm5FltX",
+      "title": "AGI 服务端工程师 （AI Agent / AI App）",
+      "tags": "1-3年 | 本科",
+      "salary": "30-60K·16薪",
+      "boss_title": "服务端资深工程师",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 88,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "c63e4ac2a3ec64d10nF63NW-F1dV",
+      "title": "大模型数据算法-视频方向",
+      "tags": "经验不限 | 本科",
+      "salary": "20-30K·15薪",
+      "boss_title": "HRBP",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "视频/数字人生成工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 76,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "b79eb6b2bc58f14503xz3d-9FVpY",
+      "title": "Agent测试开发工程师-2026届",
+      "tags": "在校/应届 | 本科",
+      "salary": "20-30K",
+      "boss_title": "测试开发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 85,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "7357d9aed3668a3403F83dy_EFZQ",
+      "title": "大模型算法工程Co-Design",
+      "tags": "经验不限 | 本科",
+      "salary": "50-70K·16薪",
+      "boss_title": "招聘HR",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "预训练算法研究员/工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 45,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "707a677e2c1d2ffb03F-2Nm1FlpQ",
+      "title": "自动化测试Agent开发工程师",
+      "tags": "1-3年 | 本科",
+      "salary": "20-40K·15薪",
+      "boss_title": "测试开发工程师",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 84,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "aa0d8f7e79cdb9f90nF93tu4EFJU",
+      "title": "高级服务端开发工程师",
+      "tags": "3-5年 | 本科",
+      "salary": "35-55K",
+      "boss_title": "招聘者",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "draft",
+      "draft_score": 22,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "d5abec78b0eb94041HB62N68E1pQ",
+      "title": "ai产品经理",
+      "tags": "3-5年 | 本科|C端产品 | AI产品",
+      "salary": "25-50K·16薪",
+      "boss_title": "产品经理",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "AI产品经理(平台/商业)",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 80,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "02590ede6976862803J60tm-EVBZ",
+      "title": "AGI 服务端工程师",
+      "tags": "经验不限 | 本科",
+      "salary": "35-55K·16薪",
+      "boss_title": "开发工程师",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "draft",
+      "draft_score": 48,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "dfa614ba3ec6b34103F72t-7EVVX",
+      "title": "服务端开发工程师-生成式AI",
+      "tags": "3-5年 | 本科|Golang服务端开发经验 | 计算机相关专业",
+      "salary": "30-60K",
+      "boss_title": "高级开发工程师",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "AI应用工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 78,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "96fec103b34b54b90nV72dW4FlFW",
+      "title": "服务端工程师 （AI Agent / AI App）",
+      "tags": "经验不限 | 本科",
+      "salary": "30-60K",
+      "boss_title": "服务端技术负责人",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 88,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "40967163b4dba09103x42Nm8GVtQ",
+      "title": "Golang",
+      "tags": "1-3年 | 本科",
+      "salary": "25-40K",
+      "boss_title": "前端开发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "draft",
+      "draft_score": 15,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "87be34e628b2d0b80nV60ty8EVVQ",
+      "title": "Agent 前端工程师 （AI Agent / AI App）",
+      "tags": "1-3年 | 本科",
+      "salary": "26-45K·16薪",
+      "boss_title": "产品研发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 82,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "ad5fb0d7c2ead5d11HF93Nu0GVtS",
+      "title": "前端开发工程师",
+      "tags": "经验不限 | 本科|JavaScript | Vue | 前端开发经验 | 不接受居家办公",
+      "salary": "25-50K·16薪",
+      "boss_title": "前端开发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 20,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "3b67b6147f81b90203F52d28GVZT",
+      "title": "前端开发工程师",
+      "tags": "1-3年 | 本科|JavaScript | CSS | React | 计算机/软件工程相关专业 | 前端开发经验 | 不接受居家办公 | AI，Agent，大模型",
+      "salary": "25-50K·14薪",
+      "boss_title": "客户端负责人",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 42,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "4edeec1c2e0bcbec1H1-3tu9EVZX",
+      "title": "前端开发工程师",
+      "tags": "1-3年 | 本科",
+      "salary": "20-40K",
+      "boss_title": "前端开发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 18,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "d10a8719113e66a603R73tS_ElRU",
+      "title": "服务端实习(实习转正)",
+      "tags": "在校/应届 | 本科|Golang",
+      "salary": "20-40K",
+      "boss_title": "服务端技术负责人",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 25,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "0da37dfb1fe821c60nV60ty8FlpR",
+      "title": "AGI 服务端工程师 （AI Agent / AI App）",
+      "tags": "1-3年 | 本科",
+      "salary": "28-55K·16薪",
+      "boss_title": "产品研发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 88,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "8e6037b6b2e7df3c1HF93Nq8EFNZ",
+      "title": "服务端负责人/高级专家",
+      "tags": "经验不限 | 本科|Java | Golang | Spring | MySQL | Redis",
+      "salary": "25-50K·16薪",
+      "boss_title": "前端开发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 28,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "36008a20df97895e1HB83dq7ElZS",
+      "title": "前端工程师—AIGC应用",
+      "tags": "经验不限 | 本科|JavaScript",
+      "salary": "30-50K·16薪",
+      "boss_title": "服务端技术负责人",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "AI应用工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 74,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "18482e95bbd5cf241HFy2961ElpX",
+      "title": "大模型推荐算法工程师",
+      "tags": "经验不限 | 硕士|计算机相关专业 | 算法工程化经验",
+      "salary": "35-65K·16薪",
+      "boss_title": "产品研发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "智能搜索/推荐工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 90,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "a50ca7639dea45ac03x62tq7E1NZ",
+      "title": "大模型算法",
+      "tags": "在校/应届 | 本科|机器学习 | 图像算法 | 深度学习 | 大模型算法 | 自然语言处理算法 | 强化学习 | Python",
+      "salary": "40-70K·16薪",
+      "boss_title": "前端开发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "预训练算法研究员/工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 90,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "a0cb55579d558f9f1HF93Nq8FVVY",
+      "title": "资深测试开发工程师[ai方向]",
+      "tags": "经验不限 | 本科|功能测试 | 压力测试 | Python",
+      "salary": "25-50K·16薪",
+      "boss_title": "前端开发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": null,
+      "gold_reject": true,
+      "label_status": "human",
+      "draft_score": 35,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "3bd4e7876dc0418c0nV72dW4GFpT",
+      "title": "AGI 服务端资深工程师 （AI Agent )",
+      "tags": "3-5年 | 本科|Python | Golang",
+      "salary": "30-60K",
+      "boss_title": "服务端技术负责人",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "Agent工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 90,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "743686b4273744e60nV60ty_FVVT",
+      "title": "大模型算法工程师",
+      "tags": "3-5年 | 硕士|深度学习 | 大模型算法 | 自然语言处理算法 | 图像算法 | 语音算法 | 大数据处理工具(Spark/Hadoop/Hive)",
+      "salary": "40-70K·16薪",
+      "boss_title": "产品研发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "预训练算法研究员/工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 90,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "163c29daefcc9aa71HB83dq5FlBX",
+      "title": "服务端开发工程师-生成式AI",
+      "tags": "经验不限 | 本科|Golang",
+      "salary": "30-60K",
+      "boss_title": "服务端技术负责人",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "AI应用工程师",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 78,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    },
+    {
+      "id": "2e26569b621391f40nV60ty-EFRW",
+      "title": "AI推理框架工程师",
+      "tags": "1-3年 | 本科|Python | Golang | Java | C++ | MySQL | Redis | MongoDB | 其他",
+      "salary": "28-55K·16薪",
+      "boss_title": "产品研发",
+      "brand_name": "MiniMax",
+      "legal_name": "MiniMax",
+      "gold_position_name": "推理优化工程师(算法层)",
+      "gold_reject": false,
+      "label_status": "human",
+      "draft_score": 80,
+      "meta": {
+        "source": "boss_list",
+        "collected_from": "yatn/match_input_smoke"
+      }
+    }
+  ]
+}

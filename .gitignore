@@ -49,6 +49,14 @@ data/skillver/company_uscc_cache.json
 data/skillver/uscc_screenshots/
 data/exports/
 
+# YATN company-job scrape: commit companies.csv; ignore local outputs.
+data/yatn/jobs/*
+!data/yatn/jobs/.gitkeep
+data/yatn/details/*
+!data/yatn/details/.gitkeep
+data/yatn/exports/*
+!data/yatn/exports/.gitkeep
+
 # Local skill tooling config (baoyu-image-gen etc.)
 .baoyu-skills/
 

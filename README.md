@@ -1,15 +1,15 @@
-# Skillver 职位采集 · Agent Skill v2.5.1
+# Skillver 职位采集 · Agent Skill v2.6.0
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-2.5.1-orange.svg)
+![Version](https://img.shields.io/badge/version-2.6.0-orange.svg)
 
-通过本机已登录 Chrome（CDP）按 **Skillver 标准岗**分步采集公开职位，由 **Agent 内置模型**归类，导出 `job_YYYYMMDD.csv`，再用网络检索 + 人工确认补全 USCC / 工商全称。
+通过本机已登录 Chrome（CDP）采集公开职位：① **Skillver 标准岗**分步流水线；② **按企业名单**召回在招岗（YATN）。均由 **Agent 内置模型**归类/打分，导出 CSV，标准岗路径还可补全 USCC / 工商全称。
 
-面向 **WorkBuddy / Hermes / Claude Code 等任意 Agent**（见 [`SKILL.md`](./SKILL.md)），也可纯命令行使用。当前内置 **BOSS直聘** 数据源适配；架构按「标准岗流水线」组织，后续可扩展更多招聘源，不必绑定单一网站。
+面向 **WorkBuddy / Hermes / Claude Code 等任意 Agent**（见 [`SKILL.md`](./SKILL.md)），也可纯命令行。当前数据源为 **BOSS直聘**。
 
-> **一句话**：本机 Chrome → 列表 → Agent 归类 → 详情 → Skillver CSV → USCC 人审回填。
+> **一句话**：本机 Chrome →（标准岗 **或** 按企业）→ Agent 归类/打分 → CSV。
 
 ---
 
@@ -65,10 +65,10 @@ Agent 完整人机流程（登录 / USCC / CSV 核验）见 [`SKILL.md`](./SKILL
 
 - **Agent Skill 友好**：闸门清晰（登录 / USCC / CSV）；不依赖脚本内 DeepSeek / `.env`
 - **标准岗主路径**：`--position-name` + `position_catalog.json`（58 岗）
-- **分步可控**：`--drain-inventory` → `--list-only` → Agent 决策 → `--details-from-decisions`
-- **明文薪资**：页面内 API（当前 BOSS 适配），默认不走易被字体反爬干扰的 DOM
-- **导出 Skillver CSV**：`job_YYYYMMDD.csv`；USCC cache + 人审后**原地回填**
-- **增量与去重**：`seen_jobs.json`（v2）；异常退出尽量保留已写文件
+- **按企业采集（YATN）**：`data/yatn/companies.csv` + `scripts/scrape_company_jobs.py`；多别名召回；列表先分流；Agent `score>70` + 标准岗后再开详情；导出后端 CSV
+- **分步可控**：标准岗 drain / list-only / details-from-decisions；企业路径 list → details → match → export
+- **明文薪资**：页面内 API（BOSS），默认不走易被字体反爬干扰的 DOM
+- **导出**：Skillver `job_YYYYMMDD.csv` 或企业岗 CSV；USCC 人审回填（标准岗路径）
 - **隔离 Chrome profile**：不碰主浏览器；macOS / Linux / Windows
 
 ### 为什么用 CDP，而不是 Selenium / Playwright？
@@ -136,6 +136,30 @@ python3 scripts/boss_cdp_raw.py --check
 
 完整说明与 Step 循环见 [`SKILL.md`](./SKILL.md)。
 
+### 按企业采集（YATN）速查
+
+```bash
+python3 scripts/scrape_company_jobs.py --scrape-list --priority S,A --pages 2 \
+  --jobs-output data/yatn/jobs/company_jobs.json
+python3 scripts/scrape_company_jobs.py --write-match-input \
+  --jobs-output data/yatn/jobs/company_jobs.json \
+  --match-input data/yatn/exports/match_input.json
+# Agent 按 references/company-job-match.md 写 match_scores 后：
+python3 scripts/scrape_company_jobs.py \
+  --jobs-output data/yatn/jobs/company_jobs.json \
+  --match-input data/yatn/exports/match_input.json \
+  --apply-scores data/yatn/exports/match_scores.json \
+  --accepted-output data/yatn/jobs/company_accepted.json
+python3 scripts/scrape_company_jobs.py --scrape-details \
+  --jobs-output data/yatn/jobs/company_accepted.json \
+  --details-output data/yatn/details/company_details.json
+python3 scripts/scrape_company_jobs.py \
+  --details-output data/yatn/details/company_details.json \
+  --export-csv data/yatn/exports/company_jobs.csv
+```
+
+企业表：`data/yatn/companies.csv`。规则：S+A 全量、不按 base 城过滤、丢日薪、列表先分流、`score>70` 才开详情/导出。
+
 ---
 
 ## Skillver 流水线
@@ -181,13 +205,17 @@ data/skillver/
 ├── LICENSE
 ├── pyproject.toml
 ├── requirements.txt
-├── references/classify-decisions.md # 归类 JSON 契约
+├── references/
+│   ├── classify-decisions.md        # 标准岗归类契约
+│   └── company-job-match.md         # 企业岗 score 契约
 ├── data/
 │   ├── city_codes.json
-│   └── skillver/position_catalog.json
+│   ├── skillver/position_catalog.json
+│   └── yatn/companies.csv           # YATN 企业名单
 ├── scripts/
-│   ├── boss_cdp_raw.py              # 当前：CDP 采集 CLI（BOSS 适配）
-│   └── export_skillver_csv.py       # 详情 → Skillver CSV
+│   ├── boss_cdp_raw.py              # 标准岗 CDP CLI
+│   ├── export_skillver_csv.py       # 标准岗 → Skillver CSV
+│   └── scrape_company_jobs.py       # 按企业采集 → 后端 CSV
 └── tests/
 ```
 

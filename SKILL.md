@@ -3,13 +3,13 @@ name: skillver-job-scraper
 description: >
   通过本机已登录 Chrome（CDP）按 Skillver 标准岗分步采集公开职位，由 Agent 内置模型归类，
   导出 Skillver job_YYYYMMDD.csv，并用 Agent 网络检索补全统一社会信用代码与工商全称。
-  用户提到 Skillver、标准岗、--position-name、职位采集、BOSS直聘、zhipin、
-  USCC、统一社会信用代码、工商全称、企业信用代码、公司主体补全，
-  或要从详情导出招聘 CSV 时，应优先使用本 skill；即使未点名 skill 名，
-  只要任务属于该流水线也应触发。本 skill 必须人机协同：登录数据源、
+  用户提到 Skillver、标准岗、--position-name、按企业采集、YATN、职位采集、
+  BOSS直聘、zhipin、USCC、统一社会信用代码、工商全称、企业信用代码、
+  公司主体补全，或要从详情导出招聘 CSV 时，应优先使用本 skill；即使未点名
+  skill 名，只要任务属于该流水线也应触发。本 skill 必须人机协同：登录数据源、
   核验 USCC 歧义主体、核验最终 CSV。禁止用企查查/Selenium 批量爬工商；
   禁止在脚本内再调 DeepSeek 或其它 API 做归类。
-version: 2.5.1
+version: 2.6.0
 author: skillver-job-scraper
 license: MIT
 platforms: [macos, linux, windows]
@@ -52,14 +52,19 @@ metadata:
 ```bash
 SCRAPER=scripts/boss_cdp_raw.py
 EXPORT=scripts/export_skillver_csv.py
+COMPANY=scripts/scrape_company_jobs.py
 REF=references/classify-decisions.md
+REF_COMPANY=references/company-job-match.md
 ```
 
 | 资源 | 用途 |
 |------|------|
-| `scripts/boss_cdp_raw.py` | CDP：`--drain-inventory` / `--list-only` / `--details-from-decisions` |
-| `scripts/export_skillver_csv.py` | 详情 → CSV + seen + USCC cache 应用 |
-| `references/classify-decisions.md` | Agent 归类 JSON 契约（**必读权威**） |
+| `scripts/boss_cdp_raw.py` | 标准岗 CDP：`--drain-inventory` / `--list-only` / `--details-from-decisions` |
+| `scripts/export_skillver_csv.py` | 标准岗详情 → Skillver CSV + seen + USCC |
+| `scripts/scrape_company_jobs.py` | **按企业**采集在招岗 → Agent 打分 → 后端 CSV |
+| `references/classify-decisions.md` | 标准岗归类契约 |
+| `references/company-job-match.md` | 企业岗 `score` + 标准岗契约 |
+| `data/yatn/companies.csv` | YATN 企业名单（S/A） |
 | `data/city_codes.json` | 城市码 |
 | `data/skillver/position_catalog.json` | 58 标准岗 |
 
@@ -336,16 +341,55 @@ python3 "$EXPORT" \
 
 ---
 
+## 按企业采集（YATN，并行路径）
+
+与标准岗主路径独立。默认跑 `companies.csv` 中 **S+A 全量**；不按岗位 base 城过滤；**丢掉日薪**。  
+顺序强制：**列表 → Agent 分流（无 JD）→ 仅录取岗开详情 → 导出**。  
+Agent 输出 `score` + 最佳标准岗；仅 **`score > 70`** 且非 null 开详情。宁缺毋滥（误杀可多，误放不允许）。契约见 `$REF_COMPANY`。
+
+```bash
+# 0) 登录
+python3 "$SCRAPER" --check --cdp-port 9222
+
+# 1) 列表（多关键词/企业；可加 --brand MiniMax 试跑）
+python3 "$COMPANY" --scrape-list --priority S,A --pages 2 \
+  --jobs-output data/yatn/jobs/company_jobs.json
+
+# 2) 写 Agent 匹配输入（基于列表）→ 按 $REF_COMPANY 写 scores
+python3 "$COMPANY" --write-match-input \
+  --jobs-output data/yatn/jobs/company_jobs.json \
+  --match-input data/yatn/exports/match_input.json
+
+# 3) 应用分数 → 录取列表
+python3 "$COMPANY" \
+  --jobs-output data/yatn/jobs/company_jobs.json \
+  --match-input data/yatn/exports/match_input.json \
+  --apply-scores data/yatn/exports/match_scores.json \
+  --accepted-output data/yatn/jobs/company_accepted.json
+
+# 4) 仅对录取岗开详情
+python3 "$COMPANY" --scrape-details \
+  --jobs-output data/yatn/jobs/company_accepted.json \
+  --details-output data/yatn/details/company_details.json
+
+# 5) 导出 CSV
+python3 "$COMPANY" \
+  --details-output data/yatn/details/company_details.json \
+  --export-csv data/yatn/exports/company_jobs.csv
+```
+
+---
+
 ## 方法选择矩阵
 
 | 场景 | 首选 | 禁止 |
 |------|------|------|
-| 抓 BOSS | `boss_cdp_raw.py` 分步三选一 | 一条命令指望脚本内 LLM |
-| 标准岗归类 | Agent 内置模型 + `references/classify-decisions.md` | DeepSeek `.env`、脚本 HTTP 调模型 |
-| 猎头/匿名 | 脚本规则（list-only 已滤） | 交给模型浪费轮次 |
+| 按标准岗抓市场 | `boss_cdp_raw.py` 分步三选一 | 一条命令指望脚本内 LLM |
+| 按企业抓在招岗 | `scrape_company_jobs.py` | 混进标准岗循环硬改 |
+| 标准岗归类 | Agent + `classify-decisions.md` | DeepSeek `.env` |
+| 企业岗打分 | Agent + `company-job-match.md`（列表先分流；score>70） | 先全量开详情；脚本内瞎填分数 |
 | 补 USCC | Agent 检索 + 人审 + 原地改 CSV | 企查查批量爬 |
-| 归类失败 | 重试 3 次 → 打断点续跑 | 规则瞎猜开详情 |
-| 日薪 `元/天` | 跳过（社招主路径不处理） | 硬改薪资解析 |
+| 日薪 `元/天` | 跳过 | 硬改薪资解析 |
 
 ## 安装（Agent Skill 目录）
 
@@ -354,13 +398,15 @@ SKILL_ROOT=~/.hermes/skills/data-science/skillver-job-scraper
 mkdir -p "$SKILL_ROOT/scripts" "$SKILL_ROOT/data/skillver" "$SKILL_ROOT/references"
 cp SKILL.md "$SKILL_ROOT/"
 cp requirements.txt "$SKILL_ROOT/"
-cp scripts/boss_cdp_raw.py scripts/export_skillver_csv.py "$SKILL_ROOT/scripts/"
+mkdir -p "$SKILL_ROOT/data/yatn"
+cp scripts/boss_cdp_raw.py scripts/export_skillver_csv.py scripts/scrape_company_jobs.py "$SKILL_ROOT/scripts/"
 cp data/city_codes.json "$SKILL_ROOT/data/"
 cp data/skillver/position_catalog.json "$SKILL_ROOT/data/skillver/"
-cp references/classify-decisions.md "$SKILL_ROOT/references/"
+cp data/yatn/companies.csv "$SKILL_ROOT/data/yatn/"
+cp references/classify-decisions.md references/company-job-match.md "$SKILL_ROOT/references/"
 ```
 
-工作数据仍落在用户工作区 `data/skillver/`（jobs/details/seen/exports/cache），勿打进 skill 包。  
+工作数据仍落在用户工作区 `data/skillver/` 与 `data/yatn/`（jobs/details/exports），勿打进 skill 包。  
 Skill 包**必须**含 `references/` + `requirements.txt`。
 
 ## 最佳实践提示词

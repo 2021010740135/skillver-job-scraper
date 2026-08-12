@@ -1,12 +1,12 @@
 ---
-name: boss-zhipin-skillver
+name: skillver-job-scraper
 description: >
-  通过本机已登录 Chrome（CDP）抓取 BOSS直聘标准岗职位，由 Agent 内置模型做标准岗归类，
+  通过本机已登录 Chrome（CDP）按 Skillver 标准岗分步采集公开职位，由 Agent 内置模型归类，
   导出 Skillver job_YYYYMMDD.csv，并用 Agent 网络检索补全统一社会信用代码与工商全称。
-  用户提到 BOSS直聘、zhipin、标准岗、--position-name、Skillver 导出、
+  用户提到 Skillver、标准岗、--position-name、职位采集、BOSS直聘、zhipin、
   USCC、统一社会信用代码、工商全称、企业信用代码、公司主体补全，
   或要从详情导出招聘 CSV 时，应优先使用本 skill；即使未点名 skill 名，
-  只要任务属于该流水线也应触发。本 skill 必须人机协同：登录 BOSS、
+  只要任务属于该流水线也应触发。本 skill 必须人机协同：登录数据源、
   核验 USCC 歧义主体、核验最终 CSV。禁止用企查查/Selenium 批量爬工商；
   禁止在脚本内再调 DeepSeek 或其它 API 做归类。
 version: 2.5.1
@@ -15,10 +15,10 @@ license: MIT
 platforms: [macos, linux, windows]
 metadata:
   hermes:
-    tags: [scraper, jobs, career, cdp, chrome, zhipin, boss直聘, skillver, uscc]
+    tags: [scraper, jobs, career, cdp, chrome, skillver, uscc, zhipin]
 ---
 
-# Skillver 职位采集（skill / boss-zhipin-skillver）
+# Skillver 职位采集（skillver-job-scraper）
 
 面向 WorkBuddy / Hermes / Claude Code **或任意 Agent** 的 **公开职位 → Skillver CSV** 执行手册（最小稳定集，v2.5.1）。当前采集适配为 BOSS直聘；编排与目录按 Skillver 标准岗流水线组织。
 

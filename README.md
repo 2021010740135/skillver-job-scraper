@@ -29,8 +29,8 @@
 
 ```bash
 # 1. 克隆 + 依赖
-git clone https://github.com/2021010740135/boss-zhipin-scraper.git
-cd boss-zhipin-scraper
+git clone https://github.com/2021010740135/skillver-job-scraper.git
+cd skillver-job-scraper
 pip install -r requirements.txt          # 或 uv sync
 
 # 2. 启动隔离 Chrome 并登录（登录态持久；首次在弹出窗口登录）
@@ -84,8 +84,8 @@ Agent 完整人机流程（登录 / USCC / CSV 核验）见 [`SKILL.md`](./SKILL
 把最小文件集拷到你的 Agent skills 目录即可（路径按宿主调整）：
 
 ```bash
-git clone https://github.com/2021010740135/boss-zhipin-scraper.git
-cd boss-zhipin-scraper
+git clone https://github.com/2021010740135/skillver-job-scraper.git
+cd skillver-job-scraper
 
 SKILL_ROOT=~/.hermes/skills/data-science/skillver-job-scraper   # 示例路径
 mkdir -p "$SKILL_ROOT/scripts" "$SKILL_ROOT/data/skillver" "$SKILL_ROOT/references"
@@ -104,8 +104,8 @@ Skill 包须含：`SKILL.md`、`requirements.txt`、`scripts/`、`references/`�
 ### B. 仅命令行
 
 ```bash
-git clone https://github.com/2021010740135/boss-zhipin-scraper.git
-cd boss-zhipin-scraper
+git clone https://github.com/2021010740135/skillver-job-scraper.git
+cd skillver-job-scraper
 pip install -r requirements.txt
 python3 scripts/boss_cdp_raw.py --setup-chrome
 python3 scripts/boss_cdp_raw.py --check

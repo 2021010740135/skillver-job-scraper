@@ -1,14 +1,14 @@
 [project]
 name = "boss-zhipin-scraper"
-version = "2.5.0"
-description = "BOSS直聘职位抓取工具 — Chrome CDP + Skillver CSV + USCC cache"
+version = "2.5.1"
+description = "Skillver 职位采集 — Chrome CDP + 标准岗分步 + Skillver CSV + USCC cache（当前含 BOSS 适配）"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [
-    { name = "eatmoreduck" }
+    { name = "skillver-job-scraper contributors" }
 ]
-keywords = ["zhipin", "boss", "scraper", "cdp", "jobs", "skillver"]
+keywords = ["skillver", "jobs", "scraper", "cdp", "chrome", "agent-skill"]
 
 dependencies = [
     "websocket-client>=1.6.0,<2.0.0",

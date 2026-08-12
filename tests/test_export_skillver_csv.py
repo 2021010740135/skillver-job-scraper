@@ -109,6 +109,30 @@ class RowMappingTests(unittest.TestCase):
         self.assertEqual(row["所在城市"], "北京")
         self.assertEqual(row["岗位base地"], "北京")
 
+    def test_location_without_city_cli_fallback_exports(self):
+        """Detail location alone is enough; export --city is optional fallback."""
+        detail = {
+            "company": "示例科技",
+            "location": "上海·浦东新区",
+            "salary": "40K-70K",
+            "jd": "这是一段足够长的岗位描述用于通过长度检查。",
+        }
+        row, reason = ex.detail_to_row(detail, self.position)
+        self.assertIsNone(reason)
+        self.assertEqual(row["所在城市"], "上海")
+        self.assertEqual(row["岗位base地"], "上海")
+
+    def test_empty_location_without_fallback_skipped(self):
+        detail = {
+            "company": "示例科技",
+            "location": "",
+            "salary": "40K-70K",
+            "jd": "这是一段足够长的岗位描述用于通过长度检查。",
+        }
+        row, reason = ex.detail_to_row(detail, self.position)
+        self.assertIsNone(row)
+        self.assertEqual(reason, "empty_city")
+
     def test_jd_strips_ascii_comma_and_quotes(self):
         detail = {
             "company": "酷哇科技",

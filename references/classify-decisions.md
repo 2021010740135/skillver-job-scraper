@@ -10,6 +10,8 @@ Agent 使用**内置模型**完成标准岗归类后，必须按本文写出 JSO
 | 归类输入（脚本 `--list-only` 写出） | `data/skillver/exports/classify_input_<岗>_<batch>.json` |
 | 归类决策（Agent 写出） | `data/skillver/exports/classify_decisions_<岗>_<batch>.json` |
 
+完整工作流（登录 / drain / 循环 / 导出 / USCC）见根目录 `SKILL.md`。本文只约束**单批 JSON**。
+
 ---
 
 ## 1. 归类输入（脚本 → Agent）
@@ -25,6 +27,7 @@ Agent 使用**内置模型**完成标准岗归类后，必须按本文写出 JSO
   "list_start_page": 1,
   "list_end_page": 2,
   "next_list_start_page": 3,
+  "city": "上海",
   "jobs": [
     {
       "id": "encrypt_job_id_xxx",
@@ -32,6 +35,7 @@ Agent 使用**内置模型**完成标准岗归类后，必须按本文写出 JSO
       "company": "示例科技",
       "boss_title": "技术总监",
       "salary": "30-50K",
+      "location": "上海·浦东新区",
       "tags": "Python,Agent",
       "job_link": "https://www.zhipin.com/job_detail/xxx.html"
     }
@@ -39,11 +43,20 @@ Agent 使用**内置模型**完成标准岗归类后，必须按本文写出 JSO
 }
 ```
 
+### Agent 归类时读哪些 / 忽略哪些
+
+| 用途 | 字段 |
+|------|------|
+| **必读（归类依据）** | `target_position_name`、`catalog_names`（或另读 `position_catalog.json`）、每条 `jobs[].id` / `title` / `company` / `boss_title` / `salary` / `tags` |
+| **可忽略（脚本给详情/导出用）** | 顶层 `city`、`jobs[].location`、`jobs[].job_link`、分页字段（`list_*` / `next_list_start_page` / `batch_index`） |
+| **编排用（不参与模型判断）** | `next_list_start_page` — Agent 在详情跑完后用来决定是否再 `--list-only` |
+
 规则：
 
 - `jobs[].id` = BOSS `encrypt_job_id`（与详情/seen 主键一致）
+- `jobs[].location` / 顶层 `city` 由脚本写入（2.5.1+）；Agent 归类可忽略
 - 输入里的岗位**已排除**猎头 / 人力资源服务 / 匿名空公司（脚本规则）；Agent 不必再判实体
-- Agent **只**对 `jobs` 内每条给出归类结果
+- Agent **只**对 `jobs` 内每条给出归类结果；`jobs` 为空则写 `results: []`
 
 ---
 
@@ -88,30 +101,42 @@ Agent 使用**内置模型**完成标准岗归类后，必须按本文写出 JSO
 - 缺少某个输入 `id`，或多出未知 `id`
 - 用 yes/no 代替 `position_name`
 
+### 写盘后自检清单
+
+1. `json.load` 可解析
+2. `results` 的 id 集合 == 输入 `jobs` 的 id 集合
+3. 每个非 null `position_name` ∈ `catalog_names`
+4. 失败最多重试 **3** 次；仍失败则打断点，**不要**开详情、不要用规则顶替归类
+
 ---
 
 ## 3. Agent 归类提示（摘要）
 
 1. 读取 `classify_input_*.json` 与 `data/skillver/position_catalog.json`（或输入内 `catalog_names`）
-2. 对每条 job 互斥归到**唯一**标准岗，或 `null`
+2. 对每条 job 互斥归到**唯一**标准岗，或 `null`（主要看 title / company / boss_title / tags / salary）
 3. 按上文写出 `classify_decisions_*.json`
-4. 自检：JSON 可解析、`results` 与输入 id 集合相等、岗名合法
-5. 失败最多重试 **3** 次；仍失败则打断点，提示用户「修好后回复继续」，**不要**开详情、不要用规则顶替归类
+4. 跑自检清单
+5. 成功后**立刻**让编排方执行 `--details-from-decisions`（归类后不要加人闸门）
 
 ---
 
-## 4. 脚本调用（分步）
+## 4. 脚本调用（单批；与 SKILL Step 对齐）
 
 ```bash
-# 清当前岗库存（不经 Agent）
-python3 scripts/boss_cdp_raw.py --position-name "<岗>" --drain-inventory
+# 清当前岗库存（不经 Agent；建议 --city 作详情 location 回退）
+python3 scripts/boss_cdp_raw.py \
+  --position-name "<岗>" --city 上海 --drain-inventory
 
 # 一批列表 → 写出 classify_input
-python3 scripts/boss_cdp_raw.py --position-name "<岗>" --city <城市> \
-  --list-only --list-start-page 1 --page-batch-size 2
+python3 scripts/boss_cdp_raw.py \
+  --position-name "<岗>" --city 上海 \
+  --list-only --list-start-page 1 --page-batch-size 2 --batch-index 1 --pages 8
 
-# Agent 写好 decisions 后开详情
-python3 scripts/boss_cdp_raw.py --position-name "<岗>" \
+# Agent 写好 decisions 后开详情（建议带同一 --city）
+python3 scripts/boss_cdp_raw.py \
+  --position-name "<岗>" --city 上海 \
   --classify-input data/skillver/exports/classify_input_<岗>_1.json \
   --details-from-decisions data/skillver/exports/classify_decisions_<岗>_1.json
 ```
+
+说明：`--min-details` 由 Agent 编排循环使用；单次脚本调用不自动翻页归类。详见 `SKILL.md`。

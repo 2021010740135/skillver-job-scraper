@@ -2,6 +2,14 @@
 
 ## 未发布
 
+### 文档
+- 重写中文单语 `README.md`：产品名 **Skillver 职位采集**；面向任意 Agent（WorkBuddy 等）与 CLI；强化免责声明；去掉双语 `README.en.md`；克隆地址改为本仓库 origin；不再维护「仅 BOSS」叙事（当前仍以 BOSS 为内置适配）
+- （历史）README / README.en 曾对齐 2.5.1 Agent 分步主路径与 CLI 表
+
+### 修复
+- **2.5.1**：补回 `write_match_skip_report`，`--details-from-decisions` 写匹配跳过报告时不再 `NameError`
+- **2.5.1**：详情 `location` 不再恒为空——详情页提取「城市·区」、list-only 透传列表 location / CLI `--city` 回退；导出无 `--city` 时只要详情有 location 即可写出城市
+
 ### 变更
 - **2.5.0 Agent 归类主路径**：标准岗改为分步 CLI（`--drain-inventory` / `--list-only` / `--details-from-decisions`）；标准岗归类改由 Agent 内置模型按 `references/classify-decisions.md` 写决策 JSON；删除脚本内 DeepSeek / `.env` 归类；猎头与匿名仍用规则过滤；他岗继续挂库存；`--min-details` 默认 5、上限 50（超限压到 50）；USCC 确认后原地改 CSV；Skill 包须含 `references/` + `requirements.txt`
 - **最小 Skill 2.4.0**：按 Mapping-Skill 风格重写 `SKILL.md`；删除非核心旁路脚本；入口仅保留 `boss-scraper` / `boss-export-skillver`

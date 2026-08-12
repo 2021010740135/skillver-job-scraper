@@ -288,6 +288,8 @@ class SplitModePipelineTests(unittest.TestCase):
             self.assertEqual(payload["schema_version"], 1)
             self.assertEqual(len(payload["jobs"]), 1)
             self.assertEqual(payload["jobs"][0]["id"], "e1")
+            self.assertEqual(payload["jobs"][0]["location"], "上海")
+            self.assertEqual(payload["city"], "上海")
 
     def test_details_from_decisions_scrapes_current_only(self):
         module = load_module()
@@ -353,6 +355,148 @@ class SplitModePipelineTests(unittest.TestCase):
             )
             self.assertEqual(scraped, ["c1"])
             self.assertIn("o1", seen["by_position"]["CV算法工程师"]["pending_details"])
+
+    def test_details_from_decisions_writes_match_skip_report_without_nameerror(self):
+        module = load_module()
+        position = {
+            "position_name": "机器学习工程师",
+            "job_intent_id": "J01",
+            "job_intent_label": "AI",
+        }
+
+        def fake_details(data, **kwargs):
+            out = []
+            for job in data.get("jobs") or []:
+                out.append({
+                    "encrypt_job_id": module.resolve_encrypt_job_id(job),
+                    "company": job.get("boss_name") or "",
+                    "location": job.get("location") or "",
+                    "salary": job.get("salary") or "40-70K",
+                    "jd": "负责机器学习模型训练与上线，覆盖特征、训练与评估全流程。" * 3,
+                    "title": job.get("title") or "",
+                    "job_link": job.get("job_link") or "",
+                })
+            path = kwargs.get("output_path")
+            if path:
+                pathlib.Path(path).write_text(
+                    json.dumps(out, ensure_ascii=False), encoding="utf-8"
+                )
+            return out
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            classify_input = {
+                "schema_version": 1,
+                "target_position_name": "机器学习工程师",
+                "batch_index": 1,
+                "city": "上海",
+                "catalog_names": CATALOG,
+                "jobs": [
+                    {
+                        "id": "c1",
+                        "title": "机器学习工程师",
+                        "company": "A",
+                        "location": "上海·浦东新区",
+                        "salary": "40-70K",
+                        "job_link": "https://www.zhipin.com/job_detail/c1.html",
+                    },
+                    {
+                        "id": "n1",
+                        "title": "运营专员",
+                        "company": "B",
+                        "location": "上海",
+                        "job_link": "https://www.zhipin.com/job_detail/n1.html",
+                    },
+                ],
+            }
+            decisions = {
+                "schema_version": 1,
+                "target_position_name": "机器学习工程师",
+                "results": [
+                    {"id": "c1", "position_name": "机器学习工程师"},
+                    {"id": "n1", "position_name": None},
+                ],
+            }
+            cin = root / "in.json"
+            dec = root / "dec.json"
+            match_report = root / "match_skip.json"
+            cin.write_text(json.dumps(classify_input, ensure_ascii=False), encoding="utf-8")
+            dec.write_text(json.dumps(decisions, ensure_ascii=False), encoding="utf-8")
+            seen = ex.empty_seen()
+            result = module.run_skillver_details_from_decisions(
+                position_binding=position,
+                catalog_names=CATALOG,
+                skillver_seen=seen,
+                skillver_seen_path=str(root / "seen.json"),
+                classify_input_path=str(cin),
+                decisions_path=str(dec),
+                detail_output=str(root / "details.json"),
+                cdp_port=9222,
+                fmt="json",
+                match_report_path=str(match_report),
+                scrape_details_fn=fake_details,
+            )
+            self.assertTrue(match_report.is_file())
+            payload = json.loads(match_report.read_text(encoding="utf-8"))
+            self.assertEqual(payload["skipped_count"], 1)
+            self.assertEqual(result["details"][0]["location"], "上海·浦东新区")
+
+    def test_details_from_decisions_preserves_location_into_scrape(self):
+        module = load_module()
+        position = {
+            "position_name": "机器学习工程师",
+            "job_intent_id": "J01",
+            "job_intent_label": "AI",
+        }
+        seen_locations = []
+
+        def fake_details(data, **kwargs):
+            for job in data.get("jobs") or []:
+                seen_locations.append(job.get("location") or "")
+            return []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            classify_input = {
+                "schema_version": 1,
+                "target_position_name": "机器学习工程师",
+                "batch_index": 1,
+                "catalog_names": CATALOG,
+                "jobs": [
+                    {
+                        "id": "c1",
+                        "title": "机器学习工程师",
+                        "company": "A",
+                        "location": "上海·徐汇区",
+                        "job_link": "https://www.zhipin.com/job_detail/c1.html",
+                    },
+                ],
+            }
+            decisions = {
+                "schema_version": 1,
+                "target_position_name": "机器学习工程师",
+                "results": [
+                    {"id": "c1", "position_name": "机器学习工程师"},
+                ],
+            }
+            cin = root / "in.json"
+            dec = root / "dec.json"
+            cin.write_text(json.dumps(classify_input, ensure_ascii=False), encoding="utf-8")
+            dec.write_text(json.dumps(decisions, ensure_ascii=False), encoding="utf-8")
+            module.run_skillver_details_from_decisions(
+                position_binding=position,
+                catalog_names=CATALOG,
+                skillver_seen=ex.empty_seen(),
+                skillver_seen_path=str(root / "seen.json"),
+                classify_input_path=str(cin),
+                decisions_path=str(dec),
+                detail_output=str(root / "details.json"),
+                cdp_port=9222,
+                fmt="json",
+                city_fallback="北京",
+                scrape_details_fn=fake_details,
+            )
+            self.assertEqual(seen_locations, ["上海·徐汇区"])
 
     def test_drain_inventory_opens_pending(self):
         module = load_module()

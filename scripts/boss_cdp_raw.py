@@ -19,7 +19,7 @@ BOSS直聘职位抓取 + 分析 — 纯 CDP raw protocol
   uv run python3 scripts/boss_cdp_raw.py --version
 """
 
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 import json
 import time
@@ -561,10 +561,27 @@ EXTRACT_DETAIL_JS = """
             jd = text;
         }
     }
+    var locationText = '';
+    var locSelectors = [
+        '.job-location .location-address',
+        '.job-location',
+        '.location-address',
+        '.job-address',
+        '.job-area'
+    ];
+    for (var li = 0; li < locSelectors.length; li++) {
+        var locEl = document.querySelector(locSelectors[li]);
+        if (!locEl) continue;
+        var locRaw = (locEl.innerText || '').replace(/\\s+/g, ' ').trim();
+        if (!locRaw) continue;
+        locationText = locRaw;
+        if (locRaw.indexOf('\\u00b7') !== -1 || locRaw.indexOf('·') !== -1) break;
+    }
     return JSON.stringify({
         jd: jd,
         page_text: pageText.substring(0, 12000),
         tags: tags,
+        location: locationText,
         url: location.href
     });
 })()
@@ -664,11 +681,51 @@ def _recruiter_footer_start(lines):
     return start
 
 
+def normalize_location(location):
+    """Collapse BOSS ``城市·区·商圈`` segments; drop empty ``·`` pieces."""
+    text = str(location or "").strip()
+    if not text:
+        return ""
+    parts = [p.strip() for p in text.replace("/", "·").split("·") if p.strip()]
+    return "·".join(parts)
+
+
+def resolve_detail_location(list_location="", detail_location="", city_fallback=""):
+    """Prefer detail-page location, then list card, then CLI city name."""
+    for candidate in (detail_location, list_location, city_fallback):
+        normalized = normalize_location(candidate)
+        if normalized:
+            return normalized
+    return ""
+
+
+_LOCATION_LINE_RE = re.compile(
+    r"^([\u4e00-\u9fffA-Za-z]{2,12}"
+    r"(?:·[\u4e00-\u9fffA-Za-z0-9]{1,20}){1,3})$"
+)
+
+
+def _location_from_page_text(page_text):
+    """Best-effort parse of ``城市·区`` lines near the top of detail page text."""
+    for line in str(page_text or "").splitlines()[:40]:
+        text = normalize_location(line.replace(" ", ""))
+        if not text or "职位描述" in text or "登录" in text:
+            continue
+        if "·" not in text:
+            continue
+        if re.search(r"\d", text) or "K" in text.upper() or "薪" in text:
+            continue
+        if _LOCATION_LINE_RE.match(text):
+            return text
+    return ""
+
+
 def extract_detail_fields(extracted, min_length=MIN_DETAIL_TEXT_LENGTH):
-    """Return validated JD and boss activity status as separate fields.
+    """Return validated JD, boss activity status, and location as separate fields.
 
     ``jd`` never includes the recruiter card or activity label.
     ``boss_active_status`` is extracted from that card when present.
+    ``location`` prefers DOM extractor output, then a conservative page_text parse.
 
     ``page_text`` is diagnostic input only. It is never persisted unless it has
     an explicit job-description section that passes all checks.
@@ -708,7 +765,14 @@ def extract_detail_fields(extracted, min_length=MIN_DETAIL_TEXT_LENGTH):
         raise DetailExtractionError(
             f"job description too short after validation: {len(jd)} < {min_length}"
         )
-    return {"jd": jd, "boss_active_status": boss_active_status}
+    location = normalize_location(extracted.get("location") or "")
+    if not location:
+        location = _location_from_page_text(page_text)
+    return {
+        "jd": jd,
+        "boss_active_status": boss_active_status,
+        "location": location,
+    }
 
 
 def extract_job_description(extracted, min_length=MIN_DETAIL_TEXT_LENGTH):
@@ -1602,6 +1666,9 @@ def scrape_list(keyword, city_input, max_pages, filters, output_path,
             for j in jobs:
                 key = j.get('job_link') or j['title']
                 j['job_id'] = hashlib.md5(key.encode()).hexdigest()[:16]
+                j['location'] = normalize_location(j.get('location', ''))
+                if not j['location'] and city_name:
+                    j['location'] = city_name
                 if key in seen:
                     continue
                 seen.add(key)
@@ -1690,7 +1757,7 @@ def resolve_encrypt_job_id(job):
     return match.group(1) if match else ""
 
 
-def build_detail_record(job, extracted, position=None):
+def build_detail_record(job, extracted, position=None, city_fallback=""):
     link = job.get("job_link", "")
     boss_active_status = resolve_boss_active_status(
         list_status=job.get("boss_active_status", ""),
@@ -1703,7 +1770,11 @@ def build_detail_record(job, extracted, position=None):
         "company": job.get("boss_name", ""),
         "salary": job.get("salary", ""),
         "salary_source": job.get("salary_source", ""),
-        "location": job.get("location", ""),
+        "location": resolve_detail_location(
+            list_location=job.get("location", ""),
+            detail_location=extracted.get("location", ""),
+            city_fallback=city_fallback,
+        ),
         "boss_active_status": boss_active_status,
         "tags_list": job.get("tags", ""),
         "job_link": link,
@@ -2034,14 +2105,18 @@ def is_obvious_non_entity_recruiter(job):
     return False, ""
 
 
-def job_card_for_agent(job):
+def job_card_for_agent(job, city_fallback=""):
     eid = resolve_encrypt_job_id(job)
+    location = normalize_location((job or {}).get("location") or "")
+    if not location:
+        location = normalize_location(city_fallback)
     return {
         "id": eid,
         "title": str((job or {}).get("title") or ""),
         "company": str((job or {}).get("boss_name") or (job or {}).get("company") or ""),
         "boss_title": str((job or {}).get("boss_title") or ""),
         "salary": str((job or {}).get("salary") or ""),
+        "location": location,
         "tags": str((job or {}).get("tags") or (job or {}).get("skills") or ""),
         "job_link": str((job or {}).get("job_link") or ""),
         "encrypt_job_id": eid,
@@ -2385,6 +2460,16 @@ def write_decision_report(path, payload):
     print(f"分类决策报告: {report_path}")
 
 
+def write_match_skip_report(path, payload):
+    if not path:
+        return
+    report_path = os.path.abspath(os.path.expanduser(path))
+    os.makedirs(os.path.dirname(report_path) or ".", exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"匹配跳过报告: {report_path}")
+
+
 def write_review_csv(path, decisions, run_meta):
     """Write human-review CSV with empty human_* columns."""
     if not path:
@@ -2485,12 +2570,14 @@ def run_skillver_drain_inventory(
     detail_output,
     cdp_port,
     fmt,
+    city_fallback="",
     scrape_details_fn=None,
 ):
     """Open details for current-position pending_details (no Agent classify)."""
     scrape_details_fn = scrape_details_fn or scrape_details
     target = position_binding["position_name"]
     catalog_set = set(catalog_names)
+    city_name = normalize_location(city_fallback)
     details = _load_existing_details_list(detail_output)
     seen_ids = skillver_seen_detail_ids(skillver_seen)
     pending_snapshot = list(skillver_pending_details(skillver_seen, target))
@@ -2502,9 +2589,13 @@ def run_skillver_drain_inventory(
     inventory_attempts = []
     if pending_snapshot:
         inv_jobs = jobs_from_seen_ids(skillver_seen, pending_snapshot, {})
+        if city_name:
+            for job in inv_jobs:
+                if isinstance(job, dict) and not normalize_location(job.get("location")):
+                    job["location"] = city_name
         before = {resolve_encrypt_job_id(j) for j in details}
         details = scrape_details_fn(
-            {"jobs": inv_jobs},
+            {"jobs": inv_jobs, "city": city_name},
             max_details=None,
             output_path=detail_output,
             cdp_port=cdp_port,
@@ -2518,6 +2609,7 @@ def run_skillver_drain_inventory(
             existing_details=details,
             skip_headhunter_filter=True,
             catalog_names=catalog_set,
+            city_fallback=city_name,
         )
         after = {resolve_encrypt_job_id(j) for j in details}
         for eid in pending_snapshot:
@@ -2587,6 +2679,12 @@ def run_skillver_list_only_batch(
         start_page=start,
     )
     candidates, skips = filter_jobs_for_agent_classify(collected, seen=skillver_seen)
+    city_name = str((list_data or {}).get("city") or "").strip()
+    if not city_name:
+        try:
+            city_name, _code = resolve_city(city)
+        except (CityResolutionError, CityAPIResponseError, OSError, ValueError):
+            city_name = str(city or "").strip()
     payload = {
         "schema_version": 1,
         "target_position_name": target,
@@ -2599,7 +2697,10 @@ def run_skillver_list_only_batch(
             if (pages_used or end_page) < hard_max
             else None
         ),
-        "jobs": [job_card_for_agent(j) for j in candidates],
+        "city": city_name,
+        "jobs": [
+            job_card_for_agent(j, city_fallback=city_name) for j in candidates
+        ],
         "skipped": skips,
         "raw_list_jobs": len(collected),
     }
@@ -2637,6 +2738,7 @@ def run_skillver_details_from_decisions(
     fmt,
     match_report_path=None,
     decision_report_path=None,
+    city_fallback="",
     scrape_details_fn=None,
 ):
     """Apply Agent decisions then scrape current-position details."""
@@ -2653,6 +2755,9 @@ def run_skillver_details_from_decisions(
         for item in jobs_meta
         if str(item.get("id") or "").strip()
     ]
+    city_name = normalize_location(
+        city_fallback or classify_input.get("city") or ""
+    )
     # Rebuild job dicts for scraping (prefer full cards from input)
     jobs_by_id = {}
     for item in jobs_meta:
@@ -2666,6 +2771,7 @@ def run_skillver_details_from_decisions(
             "boss_name": item.get("company") or "",
             "boss_title": item.get("boss_title") or "",
             "salary": item.get("salary") or "",
+            "location": normalize_location(item.get("location") or "") or city_name,
             "tags": item.get("tags") or "",
             "job_link": item.get("job_link") or "",
             "encrypt_job_id": eid,
@@ -2721,6 +2827,7 @@ def run_skillver_details_from_decisions(
             existing_details=details,
             skip_headhunter_filter=True,
             catalog_names=catalog_set,
+            city_fallback=city_name,
         )
     new_count = max(0, skillver_count_details(skillver_seen, target) - baseline)
     run_meta = {
@@ -2837,8 +2944,12 @@ def scrape_details(list_data, max_details=None, output_path=None,
                    skillver_seen_path=None,
                    existing_details=None,
                    skip_headhunter_filter=False,
-                   catalog_names=None):
+                   catalog_names=None,
+                   city_fallback=""):
     jobs = list(list_data.get("jobs", []) or [])
+    city_name = normalize_location(
+        city_fallback or (list_data or {}).get("city") or ""
+    )
     if skip_headhunter_filter:
         removed_headhunters = 0
     else:
@@ -2954,6 +3065,7 @@ def scrape_details(list_data, max_details=None, output_path=None,
                 list_status=job.get("boss_active_status", ""),
                 detail_status=fields["boss_active_status"],
             )
+            d["location"] = fields.get("location") or d.get("location") or ""
         except DetailLoginRequiredError as exc:
             ws.send("Target.closeTarget", {"targetId": tid})
             ws.close()
@@ -2966,7 +3078,9 @@ def scrape_details(list_data, max_details=None, output_path=None,
             ws.close()
             continue
 
-        detail = build_detail_record(job, d, position=position_binding)
+        detail = build_detail_record(
+            job, d, position=position_binding, city_fallback=city_name
+        )
         results.append(detail)
         detail_eid = detail.get("encrypt_job_id") or eid
         if detail_eid:
@@ -4255,6 +4369,10 @@ def main():
             )
         if not ensure_scrape_login(args.cdp_port):
             sys.exit(1)
+        try:
+            drain_city_fallback, _ = resolve_city(args.city)
+        except (CityResolutionError, CityAPIResponseError, OSError, ValueError):
+            drain_city_fallback = str(args.city or "").strip()
         drained = run_skillver_drain_inventory(
             position_binding=position_binding,
             catalog_names=catalog_names,
@@ -4263,6 +4381,7 @@ def main():
             detail_output=args.detail_output,
             cdp_port=args.cdp_port,
             fmt=args.format,
+            city_fallback=drain_city_fallback,
         )
         details = drained.get("details") or []
         print(
@@ -4316,6 +4435,10 @@ def main():
         if not ensure_scrape_login(args.cdp_port):
             sys.exit(1)
         try:
+            try:
+                city_fallback_name, _city_code = resolve_city(args.city)
+            except (CityResolutionError, CityAPIResponseError, OSError, ValueError):
+                city_fallback_name = str(args.city or "").strip()
             applied = run_skillver_details_from_decisions(
                 position_binding=position_binding,
                 catalog_names=catalog_names,
@@ -4328,6 +4451,7 @@ def main():
                 fmt=args.format,
                 match_report_path=args.match_report,
                 decision_report_path=args.decision_report,
+                city_fallback=city_fallback_name,
             )
         except ValueError as exc:
             print(f"❌ {exc}")
@@ -4390,8 +4514,14 @@ def main():
         if jobs_for_detail:
             if args.input and not ensure_scrape_login(args.cdp_port):
                 sys.exit(1)
+            try:
+                detail_city_fallback, _ = resolve_city(args.city)
+            except (CityResolutionError, CityAPIResponseError, OSError, ValueError):
+                detail_city_fallback = str(
+                    list_data.get("city") or args.city or ""
+                ).strip()
             details = scrape_details(
-                {"jobs": jobs_for_detail},
+                {"jobs": jobs_for_detail, "city": detail_city_fallback},
                 args.max_details,
                 args.detail_output,
                 cdp_port=args.cdp_port,
@@ -4405,6 +4535,7 @@ def main():
                 existing_details=details or None,
                 skip_headhunter_filter=bool(position_binding),
                 catalog_names=set(catalog_names) if catalog_names else None,
+                city_fallback=detail_city_fallback,
             )
             if position_binding and args.match_report:
                 write_match_skip_report(

@@ -7,6 +7,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 from unittest import mock
@@ -645,6 +646,67 @@ class ChromeSetupTests(unittest.TestCase):
         self.assertEqual(fields["jd"], description.strip())
         self.assertEqual(fields["boss_active_status"], "在线")
         self.assertNotIn("在线", fields["jd"])
+
+    def test_extract_detail_fields_returns_location(self):
+        module = load_module()
+        description = "负责 AI 产品规划、需求分析和跨团队项目推进。\n" * 8
+        fields = module.extract_detail_fields({
+            "jd": f"职位描述\n{description}",
+            "page_text": f"AI工程师\n30-50K\n上海·浦东新区\n职位描述\n{description}",
+            "location": "上海·浦东新区·张江",
+        })
+        self.assertEqual(fields["location"], "上海·浦东新区·张江")
+
+    def test_extract_detail_fields_location_from_page_text(self):
+        module = load_module()
+        description = "负责 AI 产品规划、需求分析和跨团队项目推进。\n" * 8
+        fields = module.extract_detail_fields({
+            "jd": f"职位描述\n{description}",
+            "page_text": (
+                f"AI工程师\n30-50K·15薪\n上海·徐汇区\n职位描述\n{description}"
+            ),
+        })
+        self.assertEqual(fields["location"], "上海·徐汇区")
+
+    def test_build_detail_record_prefers_detail_location_then_city_fallback(self):
+        module = load_module()
+        job = {
+            "job_id": "abc123",
+            "title": "AI Engineer",
+            "boss_name": "Acme",
+            "salary": "30-60K",
+            "location": "",
+            "job_link": "https://www.zhipin.com/job_detail/abc.html",
+        }
+        detail = module.build_detail_record(
+            job,
+            {"jd": "x" * 130, "tags": [], "location": "上海·浦东新区"},
+        )
+        self.assertEqual(detail["location"], "上海·浦东新区")
+
+        detail_fallback = module.build_detail_record(
+            job,
+            {"jd": "x" * 130, "tags": []},
+            city_fallback="北京",
+        )
+        self.assertEqual(detail_fallback["location"], "北京")
+
+    def test_detail_extractor_includes_location_field(self):
+        module = load_module()
+        self.assertIn("location:", module.EXTRACT_DETAIL_JS)
+        self.assertIn("job-location", module.EXTRACT_DETAIL_JS)
+
+    def test_write_match_skip_report_writes_json(self):
+        module = load_module()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "match_skip.json"
+            module.write_match_skip_report(
+                str(path),
+                {"skipped_count": 1, "skipped": [{"id": "x", "reason": "none"}]},
+            )
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["skipped_count"], 1)
+            self.assertEqual(payload["skipped"][0]["id"], "x")
 
     def test_map_list_boss_active_status_from_representative_responses(self):
         module = load_module()

@@ -4,9 +4,7 @@
 Main path: fixed catalog mapping + rule-parsed salary/city.
 Uses data/skillver/seen_jobs.json (version 2: jobs + by_position indexes)
 to select pending_export and skip already-exported jobs.
-Optional company USCC cache (company_uscc_cache.json; filled via Agent web
-lookup + human confirm) rewrites 企业名称 to legal_name and fills
-统一社会信用代码. Does not call LLM.
+Does not call LLM.
 Shared seen helpers are used by the scraper (P4–P6).
 """
 
@@ -21,8 +19,6 @@ from pathlib import Path
 from typing import Any
 
 CSV_HEADERS = [
-    "企业名称",
-    "统一社会信用代码",
     "招聘品牌名",
     "所在城市",
     "一级编号",
@@ -36,9 +32,6 @@ CSV_HEADERS = [
 DEFAULT_CATALOG = Path("data") / "skillver" / "position_catalog.json"
 DEFAULT_EXPORTS_DIR = Path("data") / "skillver" / "exports"
 DEFAULT_SEEN = Path("data") / "skillver" / "seen_jobs.json"
-DEFAULT_USCC_CACHE = Path("data") / "skillver" / "company_uscc_cache.json"
-
-USCC_RE = re.compile(r"^[0-9A-HJ-NPQRTUWXY]{2}\d{6}[0-9A-HJ-NPQRTUWXY]{10}$")
 
 
 def default_output_path(day: datetime | None = None) -> Path:
@@ -616,10 +609,42 @@ def check_seen_index_consistency(
     return errors
 
 
+# 城市前缀表：从无分隔符 location（如「上海青浦区…」）提取城市名。
+DEFAULT_CITY_CODES = Path("data") / "city_codes.json"
+
+
+def _load_city_names() -> tuple[str, ...]:
+    try:
+        with DEFAULT_CITY_CODES.open(encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return ()
+    if not isinstance(data, dict):
+        return ()
+    return tuple(sorted((str(k or "").strip() for k in data if k), key=len, reverse=True))
+
+
+_CITY_NAMES = _load_city_names()
+
+
+def _match_city_prefix(loc: str) -> str:
+    """Longest city name that prefixes loc (e.g. 上海青浦区… → 上海)."""
+    for name in _CITY_NAMES:
+        if loc.startswith(name):
+            return name
+    return ""
+
+
 def city_from_location(location: str, city_fallback: str = "") -> str:
-    parts = [p.strip() for p in str(location or "").split("·") if p.strip()]
-    if parts:
-        return parts[0]
+    loc = str(location or "").strip()
+    if loc:
+        hit = _match_city_prefix(loc)
+        if hit:
+            return hit
+    if "·" in loc:
+        parts = [p.strip() for p in loc.split("·") if p.strip()]
+        if parts:
+            return parts[0]
     return str(city_fallback or "").strip()
 
 
@@ -704,14 +729,9 @@ def is_obvious_mislabeled(*, title: str = "", jd: str = "") -> bool:
 
 
 def row_dedupe_key(row: dict[str, str]) -> tuple[str, str]:
-    """Prefer USCC+position when present; else brand/company + position."""
-    uscc = sanitize_csv_field(row.get("统一社会信用代码") or "")
+    """Dedupe by brand + position."""
+    brand = sanitize_csv_field(row.get("招聘品牌名") or "")
     position = sanitize_csv_field(row.get("岗位名称") or "")
-    if uscc:
-        return (f"uscc:{uscc}", position)
-    brand = sanitize_csv_field(
-        row.get("招聘品牌名") or row.get("企业名称") or ""
-    )
     return (brand, position)
 
 
@@ -729,7 +749,7 @@ def prefer_row(existing: dict[str, str], candidate: dict[str, str]) -> dict[str,
 def dedupe_rows_by_company_position(
     rows: list[dict[str, str]],
 ) -> tuple[list[dict[str, str]], int]:
-    """Keep one row per (企业名称, 岗位名称). Returns (rows, dropped_count)."""
+    """Keep one row per (招聘品牌名, 岗位名称). Returns (rows, dropped_count)."""
     chosen: dict[tuple[str, str], dict[str, str]] = {}
     order: list[tuple[str, str]] = []
     dropped = 0
@@ -781,120 +801,16 @@ def detail_to_row(
         return None, "salary_too_low"
 
     row = {
-        "企业名称": company,
-        "统一社会信用代码": "",
         "招聘品牌名": company,
         "所在城市": city,
         "一级编号": sanitize_csv_field(position["job_intent_id"]),
         "一级岗位名称": sanitize_csv_field(position["job_intent_label"]),
         "岗位名称": sanitize_csv_field(position["position_name"]),
         "岗位描述": jd,
-        "岗位base地": city,
+        "岗位base地": sanitize_csv_field(str(detail.get("location") or "").strip()) or city,
         "岗位薪资": salary,
     }
     return row, None
-
-
-def empty_uscc_cache() -> dict[str, Any]:
-    return {"version": 1, "by_brand": {}, "by_uscc": {}}
-
-
-def load_uscc_cache(path: str | Path) -> dict[str, Any]:
-    cache_path = Path(path).expanduser()
-    if not cache_path.is_file():
-        return empty_uscc_cache()
-    with cache_path.open(encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"uscc cache must be a JSON object: {cache_path}")
-    by_brand = data.get("by_brand")
-    by_uscc = data.get("by_uscc")
-    if not isinstance(by_brand, dict):
-        by_brand = {}
-    if not isinstance(by_uscc, dict):
-        by_uscc = {}
-    return {
-        "version": int(data.get("version") or 1),
-        "by_brand": by_brand,
-        "by_uscc": by_uscc,
-    }
-
-
-def save_uscc_cache(path: str | Path, cache: dict[str, Any]) -> None:
-    out = Path(path).expanduser()
-    out.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "version": int(cache.get("version") or 1),
-        "by_brand": cache.get("by_brand") if isinstance(cache.get("by_brand"), dict) else {},
-        "by_uscc": cache.get("by_uscc") if isinstance(cache.get("by_uscc"), dict) else {},
-    }
-    out.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
-
-def is_valid_uscc(value: str) -> bool:
-    return bool(USCC_RE.fullmatch(str(value or "").strip()))
-
-
-def lookup_company_enrichment(
-    cache: dict[str, Any],
-    brand: str,
-) -> dict[str, str] | None:
-    """Resolve brand → {uscc, legal_name} via by_brand then by_uscc."""
-    key = str(brand or "").strip()
-    if not key:
-        return None
-    by_brand = cache.get("by_brand") if isinstance(cache.get("by_brand"), dict) else {}
-    entry = by_brand.get(key)
-    if not isinstance(entry, dict):
-        return None
-    uscc = str(entry.get("uscc") or "").strip()
-    legal = str(entry.get("legal_name") or "").strip()
-    if uscc and not legal:
-        by_uscc = cache.get("by_uscc") if isinstance(cache.get("by_uscc"), dict) else {}
-        subject = by_uscc.get(uscc)
-        if isinstance(subject, dict):
-            legal = str(subject.get("legal_name") or "").strip()
-    if not uscc and not legal:
-        return None
-    return {"uscc": uscc, "legal_name": legal}
-
-
-def apply_uscc_cache_to_rows(
-    rows: list[dict[str, str]],
-    cache: dict[str, Any],
-) -> tuple[list[dict[str, str]], int]:
-    """Rewrite 企业名称 to legal_name and fill USCC when cache hits.
-
-    Returns (rows, hit_count). Company uniqueness for backends should use USCC.
-    """
-    hit = 0
-    out: list[dict[str, str]] = []
-    for row in rows:
-        brand = sanitize_csv_field(
-            row.get("招聘品牌名") or row.get("企业名称") or ""
-        )
-        enriched = dict(row)
-        enriched["招聘品牌名"] = brand or sanitize_csv_field(
-            row.get("招聘品牌名") or ""
-        )
-        info = lookup_company_enrichment(cache, brand)
-        if info:
-            hit += 1
-            if info.get("legal_name"):
-                enriched["企业名称"] = sanitize_csv_field(info["legal_name"])
-            if info.get("uscc"):
-                enriched["统一社会信用代码"] = sanitize_csv_field(info["uscc"])
-        else:
-            enriched.setdefault("统一社会信用代码", row.get("统一社会信用代码") or "")
-            if not enriched.get("招聘品牌名"):
-                enriched["招聘品牌名"] = sanitize_csv_field(
-                    row.get("企业名称") or ""
-                )
-        out.append(enriched)
-    return out, hit
 
 
 def csv_row_from_dict(
@@ -903,11 +819,8 @@ def csv_row_from_dict(
     min_salary_low_k: int = MIN_SALARY_LOW_K,
 ) -> tuple[dict[str, str] | None, str | None]:
     """Re-validate / sanitize an already-exported Skillver CSV row."""
-    brand = sanitize_csv_field(
-        row.get("招聘品牌名") or row.get("企业名称") or ""
-    )
-    company = sanitize_csv_field(row.get("企业名称") or "") or brand
-    if not company:
+    brand = sanitize_csv_field(row.get("招聘品牌名") or "")
+    if not brand:
         return None, "empty_company"
     city = sanitize_csv_field(row.get("所在城市") or "")
     base = sanitize_csv_field(row.get("岗位base地") or "") or city
@@ -929,13 +842,8 @@ def csv_row_from_dict(
     position_name = sanitize_csv_field(row.get("岗位名称") or "")
     if not intent_id or not intent_label or not position_name:
         return None, "missing_position_fields"
-    uscc = sanitize_csv_field(row.get("统一社会信用代码") or "")
-    if uscc and not is_valid_uscc(uscc):
-        return None, "invalid_uscc"
     return {
-        "企业名称": company,
-        "统一社会信用代码": uscc,
-        "招聘品牌名": brand or company,
+        "招聘品牌名": brand,
         "所在城市": city,
         "一级编号": intent_id,
         "一级岗位名称": intent_label,
@@ -961,7 +869,7 @@ def cleanup_csv_rows(
                 {
                     "index": index,
                     "reason": reason,
-                    "company": row.get("企业名称") or "",
+                    "company": row.get("招聘品牌名") or "",
                     "position_name": row.get("岗位名称") or "",
                     "salary": row.get("岗位薪资") or "",
                 }
@@ -1172,14 +1080,6 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"seen_jobs.json path (default: {DEFAULT_SEEN})",
     )
     parser.add_argument(
-        "--uscc-cache",
-        default=str(DEFAULT_USCC_CACHE),
-        help=(
-            "company_uscc_cache.json (Agent web lookup + human confirm; "
-            f"default: {DEFAULT_USCC_CACHE}; missing file is OK)"
-        ),
-    )
-    parser.add_argument(
         "--city",
         default="",
         help="Fallback city / base when location is empty",
@@ -1227,11 +1127,6 @@ def main(argv: list[str] | None = None) -> None:
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         raise SystemExit(f"error: failed to load seen: {exc}") from exc
 
-    try:
-        uscc_cache = load_uscc_cache(args.uscc_cache)
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        raise SystemExit(f"error: failed to load uscc cache: {exc}") from exc
-
     rows, skipped, pending = export_details(
         details,
         position,
@@ -1239,16 +1134,14 @@ def main(argv: list[str] | None = None) -> None:
         seen=seen,
         catalog_names=catalog_names,
     )
-    rows, uscc_hits = apply_uscc_cache_to_rows(rows, uscc_cache)
 
     print(
-        "position=%s details=%s exported=%s skipped=%s uscc_hits=%s"
+        "position=%s details=%s exported=%s skipped=%s"
         % (
             position["position_name"],
             len(details),
             len(rows),
             len(skipped),
-            uscc_hits,
         )
     )
 
@@ -1257,10 +1150,8 @@ def main(argv: list[str] | None = None) -> None:
         "details_count": len(details),
         "exported_count": len(rows),
         "skipped_count": len(skipped),
-        "uscc_hits": uscc_hits,
         "skipped": skipped,
         "seen": str(Path(args.seen).expanduser()),
-        "uscc_cache": str(Path(args.uscc_cache).expanduser()),
         "output": None if args.dry_run else str(output_path),
         "dry_run": bool(args.dry_run),
     }

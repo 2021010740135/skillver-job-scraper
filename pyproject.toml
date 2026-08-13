@@ -1,7 +1,7 @@
 [project]
 name = "boss-zhipin-scraper"
-version = "2.6.0"
-description = "Skillver 职位采集 — Chrome CDP + 标准岗分步 + Skillver CSV + USCC cache（当前含 BOSS 适配）"
+version = "2.10.0"
+description = "Skillver 职位采集 — Chrome CDP + 标准岗分步 + Skillver CSV（当前含 BOSS 适配）"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
@@ -35,8 +35,8 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["scripts"]
 # 城市码表 data/city_codes.json 打进 wheel，pip install 后也能读到（见 issue #24）
-force-include = {
-  "data/city_codes.json" = "data/city_codes.json",
-  "data/skillver/position_catalog.json" = "data/skillver/position_catalog.json",
-  "data/yatn/companies.csv" = "data/yatn/companies.csv",
-}
+[tool.hatch.build.targets.wheel.force-include]
+"data/city_codes.json" = "data/city_codes.json"
+"data/skillver/position_catalog.json" = "data/skillver/position_catalog.json"
+"data/skillver/position_aliases.json" = "data/skillver/position_aliases.json"
+"data/yatn/companies.csv" = "data/yatn/companies.csv"

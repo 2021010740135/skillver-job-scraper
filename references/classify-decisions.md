@@ -10,7 +10,7 @@ Agent 使用**内置模型**完成标准岗归类后，必须按本文写出 JSO
 | 归类输入（脚本 `--list-only` 写出） | `data/skillver/exports/classify_input_<岗>_<batch>.json` |
 | 归类决策（Agent 写出） | `data/skillver/exports/classify_decisions_<岗>_<batch>.json` |
 
-完整工作流（登录 / drain / 循环 / 导出 / USCC）见根目录 `SKILL.md`。本文只约束**单批 JSON**。
+完整工作流（登录 / drain / 循环 / 导出）见根目录 `SKILL.md`。本文只约束**单批 JSON**。
 
 ---
 

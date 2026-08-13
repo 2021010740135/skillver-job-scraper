@@ -19,7 +19,7 @@ BOSS直聘职位抓取 + 分析 — 纯 CDP raw protocol
   uv run python3 scripts/boss_cdp_raw.py --version
 """
 
-__version__ = "2.5.1"
+__version__ = "2.10.0"
 
 import json
 import time
@@ -1920,6 +1920,70 @@ def default_skillver_output_paths(position_name):
         DEFAULT_SKILLVER_DETAILS_DIR, f"boss_details_{slug}.json"
     )
     return list_path, detail_path
+
+
+def default_task_state_path(position_name):
+    """Per-position resume state: data/skillver/task_state_<岗>.json."""
+    slug = keyword_output_slug(position_name, 1)
+    if slug.startswith("01_"):
+        slug = slug[3:]
+    return os.path.join(
+        os.path.dirname(DEFAULT_SKILLVER_JOBS_DIR), f"task_state_{slug}.json"
+    )
+
+
+def load_task_state(position_name):
+    """Return resume state dict for a position, or None if absent/invalid."""
+    path = default_task_state_path(position_name)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def save_task_state(position_name, **fields):
+    """Merge fields into the position's resume state and persist it."""
+    state = load_task_state(position_name) or {
+        "schema_version": 1,
+        "position_name": position_name,
+        "new_details_count": 0,
+    }
+    state.update(fields)
+    state["updated_at"] = datetime.now().isoformat()
+    path = default_task_state_path(position_name)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False, indent=2)
+    print(f"ℹ️  任务状态已保存: {path}")
+
+
+def print_resume_hint(position_name, min_details):
+    """If a prior task state exists, tell the Agent where to resume."""
+    state = load_task_state(position_name)
+    if not state:
+        return
+    stage = str(state.get("stage") or "?")
+    batch = state.get("batch_index") or "?"
+    nxt = state.get("next_list_start_page")
+    nxt_txt = str(nxt) if nxt else "无更多列表页/未知"
+    new_count = int(state.get("new_details_count") or 0)
+    try:
+        target = int(min_details or 0)
+    except (TypeError, ValueError):
+        target = 0
+    reached = target > 0 and new_count >= target
+    print(
+        f"ℹ️  检测到上次任务状态（断点续爬）: 阶段={stage} "
+        f"批次={batch} 下一批从第 {nxt_txt} 页 "
+        f"已新增详情={new_count}/{min_details}"
+    )
+    if reached:
+        print("   续爬建议：已新增详情 ≥ min-details → 直接 export；如需更多再继续列表循环")
+    else:
+        print("   续爬建议：详情未达标且有下一页 → 下一批 --list-only 继续；无下一页 → export 现有")
 
 
 def iter_detail_json_paths(roots):
@@ -4339,6 +4403,8 @@ def main():
             print(f"❌ 无法加载 seen: {exc}")
             sys.exit(1)
 
+        print_resume_hint(position_binding["position_name"], args.min_details)
+
     # 抓取前校验城市，避免无效中文名被原样作为 city 参数继续请求。
     if will_scrape_list:
         try:
@@ -4412,6 +4478,15 @@ def main():
             f"drain-inventory 完成：目标 min-details={args.min_details}，"
             f"本轮新增 {drained.get('details_new_this_run')}"
         )
+        _old_state = load_task_state(position_binding["position_name"]) or {}
+        save_task_state(
+            position_binding["position_name"],
+            stage="drain",
+            city=str(args.city or "").strip(),
+            min_details=args.min_details,
+            new_details_count=int(_old_state.get("new_details_count") or 0)
+            + int(drained.get("details_new_this_run") or 0),
+        )
         # skip legacy list/detail paths
         will_scrape_list = False
         will_scrape_details = False
@@ -4445,6 +4520,15 @@ def main():
             allow_dom_fallback=args.allow_dom_fallback,
         )
         list_data = listed.get("list_data") or list_data
+        save_task_state(
+            position_binding["position_name"],
+            stage="list",
+            city=str(args.city or "").strip(),
+            min_details=args.min_details,
+            batch_index=int(args.batch_index or 1),
+            list_start_page=int(args.list_start_page or 1),
+            next_list_start_page=(list_data or {}).get("next_list_start_page"),
+        )
         will_scrape_details = False
         args.detail = False
 
@@ -4482,6 +4566,15 @@ def main():
             sys.exit(1)
         details = applied.get("details") or []
         match_skips = applied.get("match_skips") or []
+        _old_state = load_task_state(position_binding["position_name"]) or {}
+        save_task_state(
+            position_binding["position_name"],
+            stage="details",
+            city=str(args.city or "").strip(),
+            min_details=args.min_details,
+            new_details_count=int(_old_state.get("new_details_count") or 0)
+            + len(details),
+        )
         will_scrape_list = False
         will_scrape_details = False
         args.detail = False

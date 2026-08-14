@@ -2,6 +2,20 @@
 
 本仓库以 **Skillver 职位采集**（`skillver-job-scraper`）为产品名。
 
+对外版本从 **1.0.0** 起算。下面 2.x 为定版前的实验记录。
+
+## 1.0.0（最初版本）
+
+### 标准岗主路径定型
+
+- 拆开的 CLI：浏览器 / 列表 / 清洗 A / 详情 / 清洗 B / 导出
+- `--query` 自由搜索；归类对上 58 岗任一即开详情
+- 每页归类、无翻页上限；`--min-details` 只作停翻目标；已映射帖全部开详情
+- `seen` 只按 `encrypt_job_id`；未导出详情记在 `unexported_details.json`
+- Windows 优先 Edge
+- 定岗映射评测约定 + `scripts/eval_position_mapping.py`
+- README 按协作版式重写（特性 / 循环 / 版本迭代 / TODO / FAQ）
+
 ## 2.18.0
 
 ### 按页映射、详情全开、未导出记账

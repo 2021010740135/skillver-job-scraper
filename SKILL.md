@@ -9,7 +9,7 @@ description: >
   skill 名，只要任务属于该流水线也应触发。本 skill 必须人机协同：登录数据源、
   核验最终 CSV。
   禁止在脚本内再调 DeepSeek 或其它 API 做归类。
-version: 2.18.0
+version: 1.0.0
 author: skillver-job-scraper
 license: MIT
 platforms: [windows]

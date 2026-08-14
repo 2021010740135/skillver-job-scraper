@@ -14,7 +14,7 @@ if str(_ROOT) not in sys.path:
 
 from scripts.job_schema import project_detail
 
-__version__ = "2.18.0"
+__version__ = "1.0.0"
 
 
 def _load_details(raw):

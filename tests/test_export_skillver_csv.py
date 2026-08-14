@@ -12,7 +12,7 @@ from pathlib import Path
 from scripts import export_skillver_csv as ex
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CATALOG_PATH = REPO_ROOT / "data" / "skillver" / "position_catalog.json"
+CATALOG_PATH = REPO_ROOT / "data" / "position_catalog.json"
 
 
 class SalaryParseTests(unittest.TestCase):
@@ -65,7 +65,6 @@ class RowMappingTests(unittest.TestCase):
         self.assertEqual(list(row.keys()), ex.CSV_HEADERS)
         self.assertEqual(row["企业名称"], "示例科技")
         self.assertEqual(row["招聘品牌名"], "示例科技")
-        self.assertEqual(row["统一社会信用代码"], "")
         self.assertEqual(row["所在城市"], "上海")
         self.assertEqual(row["一级编号"], "J02")
         self.assertEqual(row["一级岗位名称"], "AI 大模型工程师")
@@ -173,7 +172,6 @@ class RowMappingTests(unittest.TestCase):
         rows = [
             {
                 "企业名称": "酷哇科技",
-                "统一社会信用代码": "",
                 "招聘品牌名": "酷哇科技",
                 "所在城市": "上海",
                 "一级编号": "J01",
@@ -190,47 +188,17 @@ class RowMappingTests(unittest.TestCase):
             text = out.read_text(encoding="utf-8-sig")
             self.assertNotIn('"', text)
 
-    def test_apply_uscc_cache_rewrites_legal_name(self):
-        rows = [
-            {
-                "企业名称": "得物App",
-                "统一社会信用代码": "",
-                "招聘品牌名": "得物App",
-                "所在城市": "上海",
-                "一级编号": "J01",
-                "一级岗位名称": "AI 算法工程师",
-                "岗位名称": "机器学习工程师",
-                "岗位描述": "足够长的岗位描述文本啊啊啊啊啊",
-                "岗位base地": "上海",
-                "岗位薪资": "40K-70K",
-            }
-        ]
-        cache = ex.empty_uscc_cache()
-        cache["by_brand"]["得物App"] = {
-            "uscc": "91310000351008055W",
-            "legal_name": "上海得物信息集团有限公司",
-        }
-        cache["by_uscc"]["91310000351008055W"] = {
-            "legal_name": "上海得物信息集团有限公司",
-            "brands": ["得物App"],
-        }
-        out, hits = ex.apply_uscc_cache_to_rows(rows, cache)
-        self.assertEqual(hits, 1)
-        self.assertEqual(out[0]["企业名称"], "上海得物信息集团有限公司")
-        self.assertEqual(out[0]["统一社会信用代码"], "91310000351008055W")
-        self.assertEqual(out[0]["招聘品牌名"], "得物App")
-
     def test_default_output_path_dated(self):
-        path = ex.default_output_path()
+        path = ex.default_output_path("Agent工程师")
         self.assertTrue(path.name.startswith("job_"))
         self.assertTrue(path.name.endswith(".csv"))
         self.assertEqual(len(path.stem), len("job_YYYYMMDD"))
+        self.assertEqual(path.parent.name, "Agent工程师")
 
-    def test_cleanup_dedupes_company_position(self):
+    def test_cleanup_keeps_same_company_standard_position(self):
         rows = [
             {
                 "企业名称": "得物App",
-                "统一社会信用代码": "",
                 "招聘品牌名": "得物App",
                 "所在城市": "上海",
                 "一级编号": "J01",
@@ -242,7 +210,6 @@ class RowMappingTests(unittest.TestCase):
             },
             {
                 "企业名称": "得物App",
-                "统一社会信用代码": "",
                 "招聘品牌名": "得物App",
                 "所在城市": "上海",
                 "一级编号": "J01",
@@ -254,13 +221,29 @@ class RowMappingTests(unittest.TestCase):
             },
         ]
         cleaned, skipped, dupes = ex.cleanup_csv_rows(rows)
-        self.assertEqual(len(cleaned), 1)
-        self.assertEqual(dupes, 1)
+        self.assertEqual(len(cleaned), 2)
+        self.assertEqual(dupes, 0)
         self.assertEqual(skipped, [])
-        self.assertIn("更长的岗位描述", cleaned[0]["岗位描述"])
 
 
 class SeenHelpersTests(unittest.TestCase):
+    def test_default_seen_path_is_global(self):
+        self.assertEqual(ex.default_seen_path(), ex.DEFAULT_SEEN_PATH)
+        self.assertEqual(ex.default_seen_path("阶跃星辰"), ex.DEFAULT_SEEN_PATH)
+        self.assertEqual(ex.DEFAULT_SEEN_PATH, Path("data") / "seen_jobs.json")
+
+    def test_listed_is_not_classified(self):
+        seen = ex.empty_seen()
+        ex.mark_listed(
+            seen,
+            key="enc-1",
+            job={"title": "ML", "boss_name": "A"},
+            query="阶跃星辰",
+        )
+        self.assertTrue(ex.job_in_seen(seen, "enc-1"))
+        self.assertFalse(ex.is_classified(seen, "enc-1"))
+        self.assertEqual(seen["jobs"]["enc-1"]["query"], "阶跃星辰")
+
     def test_mark_and_is_exported(self):
         seen = ex.empty_seen()
         self.assertFalse(ex.is_exported(seen, "enc-1"))
@@ -325,6 +308,8 @@ class CliExportTests(unittest.TestCase):
                     str(out_path),
                     "--seen",
                     str(seen_path),
+                    "--unexported",
+                    str(tmp_path / "unexported.json"),
                     "--report",
                     str(report_path),
                 ]
@@ -376,6 +361,8 @@ class CliExportTests(unittest.TestCase):
                 str(out_path),
                 "--seen",
                 str(seen_path),
+                "--unexported",
+                str(tmp_path / "unexported.json"),
             ]
             ex.main(common + ["--report", str(report1)])
             ex.main(common + ["--append", "--report", str(report2)])
@@ -425,32 +412,180 @@ class CliExportTests(unittest.TestCase):
                     str(out_path),
                     "--seen",
                     str(seen_path),
+                    "--unexported",
+                    str(tmp_path / "unexported.json"),
                     "--dry-run",
                 ]
             )
             self.assertFalse(out_path.exists())
             self.assertFalse(seen_path.exists())
 
-    def test_cli_unknown_position(self):
+    def test_export_uses_per_row_catalog_position(self):
+        catalog = [
+            {
+                "position_name": "机器学习工程师",
+                "job_intent_id": "J01",
+                "job_intent_label": "AI 算法工程师",
+            },
+            {
+                "position_name": "CV算法工程师",
+                "job_intent_id": "J03",
+                "job_intent_label": "AI 视觉工程师",
+            },
+        ]
+        details = [
+            {
+                "company": "甲科技",
+                "location": "上海",
+                "salary": "40-70K",
+                "jd": "负责机器学习模型训练与上线的足够长描述。",
+                "encrypt_job_id": "a1",
+                "position_name": "机器学习工程师",
+            },
+            {
+                "company": "乙科技",
+                "location": "上海",
+                "salary": "40-70K",
+                "jd": "负责计算机视觉算法研发的足够长描述文本。",
+                "encrypt_job_id": "b1",
+                "position_name": "CV算法工程师",
+            },
+        ]
+        rows, skipped, pending = ex.export_details(
+            details, None, catalog=catalog, seen=ex.empty_seen()
+        )
+        self.assertEqual(skipped, [])
+        self.assertEqual([row["岗位名称"] for row in rows], ["机器学习工程师", "CV算法工程师"])
+        self.assertEqual([row["一级编号"] for row in rows], ["J01", "J03"])
+        self.assertEqual({item["position_name"] for item in pending}, {
+            "机器学习工程师",
+            "CV算法工程师",
+        })
+
+    def test_export_keeps_same_catalog_position_different_jobs(self):
+        catalog = [
+            {
+                "position_name": "AI平台工程师",
+                "job_intent_id": "J06",
+                "job_intent_label": "AI 基础设施 / MLOps",
+            },
+        ]
+        details = [
+            {
+                "company": "上海阶跃星辰智能科技",
+                "location": "上海",
+                "salary": "30-60K",
+                "jd": "负责大模型相关业务的服务端研发工作足够长。",
+                "encrypt_job_id": "a1",
+                "position_name": "AI平台工程师",
+            },
+            {
+                "company": "上海阶跃星辰智能科技",
+                "location": "上海",
+                "salary": "50-80K",
+                "jd": "infra 团队招聘推理与平台方向的足够长描述。",
+                "encrypt_job_id": "b1",
+                "position_name": "AI平台工程师",
+            },
+        ]
+        rows, skipped, pending = ex.export_details(
+            details, None, catalog=catalog, seen=ex.empty_seen()
+        )
+        self.assertEqual(skipped, [])
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({item["key"] for item in pending}, {"a1", "b1"})
+
+    def test_cli_unknown_position_name_is_query_alias(self):
         with tempfile.TemporaryDirectory() as tmp:
             details_path = Path(tmp) / "details.json"
             details_path.write_text("[]", encoding="utf-8")
-            with self.assertRaises(SystemExit) as ctx:
-                ex.main(
-                    [
-                        "--details",
-                        str(details_path),
-                        "--position-name",
-                        "完全不存在",
-                        "--catalog",
-                        str(CATALOG_PATH),
-                        "--output",
-                        str(Path(tmp) / "out.csv"),
-                        "--seen",
-                        str(Path(tmp) / "seen.json"),
-                    ]
-                )
-            self.assertIn("unknown", str(ctx.exception))
+            out_path = Path(tmp) / "out.csv"
+            ex.main(
+                [
+                    "--details",
+                    str(details_path),
+                    "--query",
+                    "完全不存在",
+                    "--catalog",
+                    str(CATALOG_PATH),
+                    "--output",
+                    str(out_path),
+                    "--seen",
+                    str(Path(tmp) / "seen.json"),
+                    "--unexported",
+                    str(Path(tmp) / "unexported.json"),
+                ]
+            )
+            self.assertTrue(out_path.is_file())
+
+
+class UnexportedDetailsTests(unittest.TestCase):
+    def test_add_and_remove_unexported(self):
+        store = ex.empty_unexported()
+        ex.add_unexported(
+            store,
+            key="a1",
+            query="阶跃星辰",
+            details_path="data/阶跃星辰/details.json",
+            position_name="机器学习工程师",
+        )
+        self.assertIn("a1", store["jobs"])
+        ex.remove_unexported(store, ["a1"])
+        self.assertNotIn("a1", store["jobs"])
+
+    def test_export_cli_merges_unexported_and_clears(self):
+        catalog = [
+            {
+                "position_name": "机器学习工程师",
+                "job_intent_id": "J01",
+                "job_intent_label": "AI 算法工程师",
+            },
+        ]
+        detail = {
+            "company": "甲科技",
+            "location": "上海",
+            "salary": "40-70K",
+            "jd": "负责机器学习模型训练与上线的足够长描述。",
+            "encrypt_job_id": "left1",
+            "position_name": "机器学习工程师",
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            leftover_path = root / "old_details.json"
+            leftover_path.write_text(
+                json.dumps([detail], ensure_ascii=False), encoding="utf-8"
+            )
+            unexported = ex.empty_unexported()
+            ex.add_unexported(
+                unexported,
+                key="left1",
+                query="阶跃星辰",
+                details_path=str(leftover_path),
+                position_name="机器学习工程师",
+            )
+            unexported_path = root / "unexported.json"
+            ex.save_unexported(unexported_path, unexported)
+            empty_details = root / "details.json"
+            empty_details.write_text("[]", encoding="utf-8")
+            catalog_path = root / "catalog.json"
+            catalog_path.write_text(
+                json.dumps(catalog, ensure_ascii=False), encoding="utf-8"
+            )
+            out_path = root / "out.csv"
+            seen_path = root / "seen.json"
+            ex.main([
+                "--details", str(empty_details),
+                "--query", "阶跃星辰",
+                "--catalog", str(catalog_path),
+                "--output", str(out_path),
+                "--seen", str(seen_path),
+                "--unexported", str(unexported_path),
+            ])
+            self.assertTrue(out_path.is_file())
+            leftover = ex.load_unexported(unexported_path)
+            self.assertNotIn("left1", leftover["jobs"])
+            seen = ex.load_seen(seen_path)
+            self.assertTrue(ex.is_exported(seen, "left1"))
 
 
 if __name__ == "__main__":

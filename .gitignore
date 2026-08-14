@@ -34,28 +34,11 @@ docs/
 # Local analysis outputs (Excel / charts / Markdown reports)
 data/reports/
 
-# Skillver: commit catalog; ignore local run state / scrape / export outputs.
-# Keep directory placeholders via .gitkeep.
-data/skillver/seen_jobs.json
-data/skillver/jobs/*
-!data/skillver/jobs/.gitkeep
-data/skillver/details/*
-!data/skillver/details/.gitkeep
-data/skillver/exports/*
-!data/skillver/exports/.gitkeep
-data/skillver/eval/*
-!data/skillver/eval/.gitkeep
-data/skillver/company_uscc_cache.json
-data/skillver/uscc_screenshots/
+# Public assets stay tracked; ignore search-term crawl folders.
+data/*/
+!data/city_codes.json
+!data/position_catalog.json
 data/exports/
-
-# YATN company-job scrape: commit companies.csv; ignore local outputs.
-data/yatn/jobs/*
-!data/yatn/jobs/.gitkeep
-data/yatn/details/*
-!data/yatn/details/.gitkeep
-data/yatn/exports/*
-!data/yatn/exports/.gitkeep
 
 # Local skill tooling config (baoyu-image-gen etc.)
 .baoyu-skills/

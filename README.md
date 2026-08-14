@@ -1,15 +1,15 @@
-# Skillver 职位采集 · Agent Skill v2.6.0
+# Skillver 职位采集 · Agent Skill v2.18.0
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-2.6.0-orange.svg)
+![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
+![Version](https://img.shields.io/badge/version-2.18.0-orange.svg)
 
-通过本机已登录 Chrome（CDP）采集公开职位：① **Skillver 标准岗**分步流水线；② **按企业名单**召回在招岗（YATN）。均由 **Agent 内置模型**归类/打分，导出 CSV，标准岗路径还可补全 USCC / 工商全称。
+通过本机已登录浏览器（Windows 优先 Edge，其次 Chrome；CDP）按 **Skillver 标准岗**分步采集公开职位，由 **Agent 内置模型**归类，导出 CSV。
 
-面向 **WorkBuddy / Hermes / Claude Code 等任意 Agent**（见 [`SKILL.md`](./SKILL.md)），也可纯命令行。当前数据源为 **BOSS直聘**。
+面向 **WorkBuddy / Hermes / Claude Code 等任意 Agent**（见 [`SKILL.md`](./SKILL.md)），也可纯命令行。当前数据源为 **BOSS直聘**。当前只支持 **Windows**。
 
-> **一句话**：本机 Chrome →（标准岗 **或** 按企业）→ Agent 归类/打分 → CSV。
+> **一句话**：本机浏览器 → 列表 → 清洗 A → Agent 归类 → 详情 → 清洗 B → Skillver CSV。
 
 ---
 
@@ -28,208 +28,135 @@
 ## 30 秒快速开始
 
 ```bash
-# 1. 克隆 + 依赖
 git clone https://github.com/2021010740135/skillver-job-scraper.git
 cd skillver-job-scraper
-pip install -r requirements.txt          # 或 uv sync
+python3 scripts/chrome_cdp.py --check --cdp-port 9222
+python3 scripts/chrome_cdp.py --setup-chrome
 
-# 2. 启动隔离 Chrome 并登录（登录态持久；首次在弹出窗口登录）
-python3 scripts/boss_cdp_raw.py --setup-chrome
-
-# 3. 标准岗分步（必须 --position-name；完整循环见 SKILL.md）
-python3 scripts/boss_cdp_raw.py \
-  --position-name "Agent工程师" --city 上海 --drain-inventory
-python3 scripts/boss_cdp_raw.py \
-  --position-name "Agent工程师" --city 上海 \
-  --list-only --list-start-page 1 --page-batch-size 2 --batch-index 1
+python3 scripts/scrape_list.py \
+  --query "阶跃星辰" --city 上海 \
+  --list-start-page 1 --page-batch-size 1 --batch-index 1
+python3 scripts/clean_classify_input.py \
+  --input data/阶跃星辰/list_batch_1.json \
+  --output data/阶跃星辰/classify_input_1.json
 # Agent 按 references/classify-decisions.md 写出 decisions 后：
-python3 scripts/boss_cdp_raw.py \
-  --position-name "Agent工程师" --city 上海 \
-  --classify-input data/skillver/exports/classify_input_Agent工程师_1.json \
-  --details-from-decisions data/skillver/exports/classify_decisions_Agent工程师_1.json
-
-# 4. 导出 Skillver CSV（建议先 --dry-run）
+python3 scripts/scrape_details.py \
+  --query "阶跃星辰" --city 上海 \
+  --classify-input data/阶跃星辰/classify_input_1.json \
+  --details-from-decisions data/阶跃星辰/classify_decisions_1.json
+python3 scripts/clean_details.py --input data/阶跃星辰/details.json
 python3 scripts/export_skillver_csv.py \
-  --details data/skillver/details/boss_details_Agent工程师.json \
-  --position-name "Agent工程师" \
-  --city 上海 \
-  --dry-run
+  --details data/阶跃星辰/details.json \
+  --query "阶跃星辰" --city 上海 --dry-run
 ```
 
-Agent 完整人机流程（登录 / USCC / CSV 核验）见 [`SKILL.md`](./SKILL.md)。  
+Agent 完整人机流程见 [`SKILL.md`](./SKILL.md)。  
 归类契约见 [`references/classify-decisions.md`](./references/classify-decisions.md)。
 
 ---
 
 ## 特性
 
-- **Agent Skill 友好**：闸门清晰（登录 / USCC / CSV）；不依赖脚本内 DeepSeek / `.env`
-- **标准岗主路径**：`--position-name` + `position_catalog.json`（58 岗）
-- **按企业采集（YATN）**：`data/yatn/companies.csv` + `scripts/scrape_company_jobs.py`；多别名召回；列表先分流；Agent `score>70` + 标准岗后再开详情；导出后端 CSV
-- **分步可控**：标准岗 drain / list-only / details-from-decisions；企业路径 list → details → match → export
+- **拆开的 CLI**：浏览器 / 列表 / 清洗 A / 详情 / 清洗 B / 导出，各司一职
+- **Agent Skill 友好**：闸门清晰（登录 / CSV）；不依赖脚本内 DeepSeek / `.env`
+- **自由搜索 + 58 岗映射**：`--query` 进搜索框；对上 catalog 任一标准岗即开详情
 - **明文薪资**：页面内 API（BOSS），默认不走易被字体反爬干扰的 DOM
-- **导出**：Skillver `job_YYYYMMDD.csv` 或企业岗 CSV；USCC 人审回填（标准岗路径）
-- **隔离 Chrome profile**：不碰主浏览器；macOS / Linux / Windows
+- **隔离浏览器 profile**：不碰主浏览器；Windows 优先 Edge，没有再用 Chrome
 
 ### 为什么用 CDP，而不是 Selenium / Playwright？
 
-受控自动化浏览器体积大、指纹明显，更容易触发招聘站风控。本工具连接**你已登录的真实 Chrome**，复用真实会话与指纹，调用页面内搜索接口拿明文薪资，比纯 DOM 爬更稳、也更克制。
+受控自动化浏览器体积大、指纹明显，更容易触发招聘站风控。本工具连接**你已登录的真实浏览器**，复用真实会话与指纹，调用页面内搜索接口拿明文薪资，比纯 DOM 爬更稳、也更克制。
 
 ---
 
 ## 安装
 
-### A. 作为 Agent Skill（WorkBuddy / Hermes 等）
+### A. 作为 Agent Skill
 
-把最小文件集拷到你的 Agent skills 目录即可（路径按宿主调整）：
+Agent 按 [`references/install.md`](./references/install.md) 把文件拷到本机 skills 目录，再跑 `--check`。不要另写安装脚本。
 
-```bash
-git clone https://github.com/2021010740135/skillver-job-scraper.git
-cd skillver-job-scraper
-
-SKILL_ROOT=~/.hermes/skills/data-science/skillver-job-scraper   # 示例路径
-mkdir -p "$SKILL_ROOT/scripts" "$SKILL_ROOT/data/skillver" "$SKILL_ROOT/references"
-cp SKILL.md requirements.txt "$SKILL_ROOT/"
-cp scripts/boss_cdp_raw.py scripts/export_skillver_csv.py "$SKILL_ROOT/scripts/"
-cp data/city_codes.json "$SKILL_ROOT/data/"
-cp data/skillver/position_catalog.json "$SKILL_ROOT/data/skillver/"
-cp references/classify-decisions.md "$SKILL_ROOT/references/"
-```
-
-Skill 包须含：`SKILL.md`、`requirements.txt`、`scripts/`、`references/`、`data/city_codes.json`、`data/skillver/position_catalog.json`。  
-工作数据（jobs/details/seen/exports/cache）落在**用户工作区**，不要打进 skill 包。
-
-对话示例：「按标准岗抓上海 Agent工程师 并导出 Skillver CSV」（须遵守 `SKILL.md` 人机闸门）。
+Skill 包须含：`SKILL.md`、`pyproject.toml`、`uv.lock`、`scripts/`（含 `ensure_uv_env.py`）、`references/`、`data/city_codes.json`、`data/position_catalog.json`。  
+工作数据落在用户工作区 `data/<搜索词>/`，不要打进 skill 包。
 
 ### B. 仅命令行
 
 ```bash
-git clone https://github.com/2021010740135/skillver-job-scraper.git
-cd skillver-job-scraper
-pip install -r requirements.txt
-python3 scripts/boss_cdp_raw.py --setup-chrome
-python3 scripts/boss_cdp_raw.py --check
+python3 scripts/chrome_cdp.py --check
+python3 scripts/chrome_cdp.py --setup-chrome
 ```
 
-可选：`pip install -e .` 后使用入口 `boss-scraper` / `boss-export-skillver`。
-
----
-
-## 主路径参数（常用）
-
-| 参数 | 说明 |
-|------|------|
-| `--position-name` | **必填**，catalog 原名；同时作搜索词 |
-| `--city` | 城市中文名或代码（默认上海）；建议始终带上 |
-| `--drain-inventory` | 清当前岗 `pending_details`（不经 Agent 归类） |
-| `--list-only` | 一批列表 → `classify_input` |
-| `--list-start-page` / `--page-batch-size` / `--batch-index` | 默认 1 / 2 / 1 |
-| `--pages` | 搜索页硬上限（默认 8） |
-| `--min-details` | 本轮目标**新增**详情数（默认 5，上限 50；Agent 循环） |
-| `--classify-input` + `--details-from-decisions` | 按 Agent 决策开详情 |
-| `--match-report` / `--decision-report` | 跳过/决策报告（标准岗有默认路径） |
-| `--cdp-port` | 默认 9222 |
-| `--setup-chrome` / `--check` / `--stop-chrome` | 环境与收尾 |
-| `--experience` / `--scale` 等 | 筛选；experience/scale 支持逗号或重复多选 |
-
-导出脚本常用：`--details`、`--position-name`、`--city`（空 location 回退）、`--dry-run`、`--append`、`--uscc-cache`。
-
-完整说明与 Step 循环见 [`SKILL.md`](./SKILL.md)。
-
-### 按企业采集（YATN）速查
-
-```bash
-python3 scripts/scrape_company_jobs.py --scrape-list --priority S,A --pages 2 \
-  --jobs-output data/yatn/jobs/company_jobs.json
-python3 scripts/scrape_company_jobs.py --write-match-input \
-  --jobs-output data/yatn/jobs/company_jobs.json \
-  --match-input data/yatn/exports/match_input.json
-# Agent 按 references/company-job-match.md 写 match_scores 后：
-python3 scripts/scrape_company_jobs.py \
-  --jobs-output data/yatn/jobs/company_jobs.json \
-  --match-input data/yatn/exports/match_input.json \
-  --apply-scores data/yatn/exports/match_scores.json \
-  --accepted-output data/yatn/jobs/company_accepted.json
-python3 scripts/scrape_company_jobs.py --scrape-details \
-  --jobs-output data/yatn/jobs/company_accepted.json \
-  --details-output data/yatn/details/company_details.json
-python3 scripts/scrape_company_jobs.py \
-  --details-output data/yatn/details/company_details.json \
-  --export-csv data/yatn/exports/company_jobs.csv
-```
-
-企业表：`data/yatn/companies.csv`。规则：S+A 全量、不按 base 城过滤、丢日薪、列表先分流、`score>70` 才开详情/导出。
+`--check` 会：查找 uv → 没有则安装 → `uv sync` 到项目 `.venv` → 查 CDP → 查登录。国内可设 `UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple`。不要把依赖 pip 进系统 Python。
 
 ---
 
 ## Skillver 流水线
 
 ```text
-drain-inventory（清库存）
-→ list-only（去重 + 猎头/匿名规则 → classify_input）
-→ Agent 按 references/classify-decisions.md 写 decisions
-→ details-from-decisions（当前岗详情 / 他岗库存 / none）
-→ 未达 min-details 且还有下一页 → 下一批
-→ export_skillver_csv → USCC 检索人审 → 原地改 CSV
+chrome_cdp --setup-chrome / --check
+→ scrape_list → jobs.json + list_batch_N.json
+→ clean_classify_input → classify_input_N.json
+→ Agent 按 classify-decisions.md 写 decisions
+→ scrape_details --details-from-decisions（从 jobs.json 取 URL）
+→ clean_details → slim details.json
+→ export_skillver_csv → 用户核验 CSV
 ```
 
 ### 核心约定
 
-1. 正式 `position_name` 只能是 catalog 原名；CSV 岗名三列来自 catalog，禁止用招聘站 title 冒充。
+1. `--query` 随便定；归类结果的 `position_name` 只能是 catalog 原名或 `null`。
 2. 归类由 **Agent 内置模型**完成；脚本内不再调外部 LLM API。
-3. `--min-details` = 本轮新增目标，不是历史累计；单次脚本调用不自动循环。
-4. `seen_jobs.json`（v2）：`jobs` 为真相表；`pending_details` / `pending_export` 为待办索引。
-5. 2.5.1 起详情应带 `location`；导出无 `--city` 也可出城；旧空 location 仍建议传 `--city`。
-6. 社招主路径不处理日薪（`元/天`）等无法规范为 `NK-MK` 的薪资。
-7. 禁止企查查 / Selenium 批量爬工商；USCC 靠公开检索 + 人审。
-
-### 目录（本地产物勿提交）
-
-```
-data/skillver/
-├── position_catalog.json      # 可提交：58 标准岗
-├── seen_jobs.json             # 本地
-├── company_uscc_cache.json    # 本地
-├── jobs/  details/  exports/  # 本地
-└── eval/                      # 可选
-```
+3. `--min-details` = 停翻页的最低映射数（默认 5，上限 50）。够了就停翻；最后一页多出来的详情全开。站点不够可以少于目标。
+4. 全局 `data/seen_jobs.json` 按 `encrypt_job_id` 去重。已爬详情但未进 CSV 的 id 记在 `data/unexported_details.json`，导出成功后去掉。
+5. 清洗只丢多余字段，不因实习 / 日薪丢卡片；导出仍跳过无法解析的日薪。
+6. `security_id` / `lid` 留在 `jobs.json`，不进 classify_input。
+7. 禁止企查查 / Selenium 批量爬工商。
 
 ---
 
 ## 文件结构
 
 ```
-├── SKILL.md                         # Agent 执行手册（主入口）
+├── SKILL.md                         # 导航（When / How / What）
 ├── README.md
 ├── CHANGELOG.md
-├── LICENSE
-├── pyproject.toml
-├── requirements.txt
 ├── references/
-│   ├── classify-decisions.md        # 标准岗归类契约
-│   └── company-job-match.md         # 企业岗 score 契约
+│   ├── install.md
+│   ├── chrome-setup.md
+│   ├── scrape-list.md
+│   ├── clean-classify-input.md
+│   ├── classify-decisions.md
+│   ├── scrape-details.md
+│   ├── clean-details.md
+│   └── export-csv.md
 ├── data/
 │   ├── city_codes.json
-│   ├── skillver/position_catalog.json
-│   └── yatn/companies.csv           # YATN 企业名单
+│   ├── position_catalog.json
+│   ├── seen_jobs.json              # 运行时：id 去重
+│   └── unexported_details.json     # 运行时：已爬详情未进 CSV
 ├── scripts/
-│   ├── boss_cdp_raw.py              # 标准岗 CDP CLI
-│   ├── export_skillver_csv.py       # 标准岗 → Skillver CSV
-│   └── scrape_company_jobs.py       # 按企业采集 → 后端 CSV
+│   ├── chrome_cdp.py
+│   ├── scrape_list.py
+│   ├── scrape_details.py
+│   ├── clean_classify_input.py
+│   ├── clean_details.py
+│   ├── export_skillver_csv.py
+│   ├── boss_common.py               # 共享运行时（非 CLI）
+│   ├── job_schema.py
+│   └── ensure_uv_env.py
 └── tests/
 ```
 
 ---
 
-## Chrome profile
+## 浏览器 profile
 
-`--setup-chrome` 使用持久隔离目录（默认 `~/.boss-zhipin-scraper/chrome-profile`），**默认不复制**主 Chrome。抓取结束后默认不关浏览器；不用时：
+`--setup-chrome` 使用持久隔离目录（默认 `~/.boss-zhipin-scraper/chrome-profile`），**默认不复制**主浏览器。Windows 先启动 Edge，没有再用 Chrome。不用时：
 
 ```bash
-python3 scripts/boss_cdp_raw.py --stop-chrome
+python3 scripts/chrome_cdp.py --stop-chrome
 ```
 
-仅按隔离 profile 匹配进程，不误杀主 Chrome。
+仅按隔离 profile 匹配进程，不误杀主浏览器。
 
 ---
 

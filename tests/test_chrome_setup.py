@@ -1944,7 +1944,7 @@ class SkillverMatchFilterTests(unittest.TestCase):
 
         self.assertEqual(calls["n"], 1)
 
-    def test_main_list_does_not_cap_pages(self):
+    def test_main_list_defaults_to_four_page_batch_without_capping_pages(self):
         from scripts import scrape_list as list_cli
 
         module = load_module()
@@ -1995,7 +1995,7 @@ class SkillverMatchFilterTests(unittest.TestCase):
                 ])
 
             self.assertEqual(captured["max_pages"], 10)
-            self.assertEqual(captured["page_batch_size"], 1)
+            self.assertEqual(captured["page_batch_size"], 4)
             self.assertNotIn("列表页数上限", output.getvalue())
 
 

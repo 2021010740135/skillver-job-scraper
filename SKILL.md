@@ -63,10 +63,10 @@ tags: [scraper, jobs, career, cdp, chrome, skillver, zhipin]
 
 1. 锁定 `--query`（搜索框，任意词）、城市（默认上海）、可选筛选、`--min-details`（用户目标，默认 5，上限 50）。这是**停翻页的最低映射数**，不是详情截断。只要导出则可跳到第 8 步。`--position-name` 只是 `--query` 的别名。
 2. 按 `[chrome-setup.md](references/chrome-setup.md)` `--check`；不通则 `--setup-chrome`，进入 `WAIT_LOGIN`。
-3. 对页 `P=1,2,…`（**不设翻页上限**）：按 `[scrape-list.md](references/scrape-list.md)` 只抓 **1 页** → `jobs.json` + `list_batch_P.json`。已在全局 seen 的 `encrypt_job_id` 不再进本页。
-4. 按 `[clean-classify-input.md](references/clean-classify-input.md)` 写出 `classify_input_P.json`。
-5. 按 `[classify-decisions.md](references/classify-decisions.md)` 写 `classify_decisions_P.json`。强制自检：纯 JSON、`schema_version===1`、`results.id` 与输入 `jobs.id` 集合相等、每个 `position_name` 为 58 岗原名或 `null`。失败最多 3 次 → 打断点，**不开详情、不用规则顶替**。
-6. 累计各批 `position_name != null` 的条数。**还不够且 `next_list_start_page` 有值** → `P+=1` 回到第 3 步（**此阶段不要开详情**）。够了、或没有下一页（站点不够可以少于目标）→ 第 7 步。
+3. 对批次 `B=1,2,…`（**不设总翻页上限**）：按 `[scrape-list.md](references/scrape-list.md)` 在一次进程、一次登录探测和同一 CDP 会话中默认连续抓 **4 页** → `jobs.json` + `list_batch_B.json`。页间保留随机等待；已在全局 seen 的 `encrypt_job_id` 不再进本批。
+4. 按 `[clean-classify-input.md](references/clean-classify-input.md)` 写出 `classify_input_B.json`。
+5. 按 `[classify-decisions.md](references/classify-decisions.md)` 写 `classify_decisions_B.json`。强制自检：纯 JSON、`schema_version===1`、`results.id` 与输入 `jobs.id` 集合相等、每个 `position_name` 为 58 岗原名或 `null`。失败最多 3 次 → 打断点，**不开详情、不用规则顶替**。
+6. 累计各批 `position_name != null` 的条数。**还不够且 `next_list_start_page` 有值** → 以上一批的 `next_list_start_page` 作为下一批起点，`B+=1` 回到第 3 步（**此阶段不要开详情**）。够了、或没有下一页（站点不够可以少于目标）→ 第 7 步。
 7. 按 `[scrape-details.md](references/scrape-details.md)` 一次传入**全部** `classify_decisions_*.json`。**已映射帖全部开详情**（最后一页多出来的也全开，不砍到 `--min-details`）。`null` 写入 seen 后跳过。
 8. 按 `[clean-details.md](references/clean-details.md)` 再 `[export-csv.md](references/export-csv.md)`：先 `--dry-run` 再正式导出。导出成功的 id 从 `data/unexported_details.json` 去掉；中途挂了下次导出会把未导出详情补进 CSV。
 9. 给出 CSV 绝对路径，进入 `WAIT_CSV_REVIEW`，等「CSV 已核验」再结束。

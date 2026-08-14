@@ -10,7 +10,8 @@
 
 - 拆开的 CLI：浏览器 / 列表 / 清洗 A / 详情 / 清洗 B / 导出
 - `--query` 自由搜索；归类对上 58 岗任一即开详情
-- 每页归类、无翻页上限；`--min-details` 只作停翻目标；已映射帖全部开详情
+- 默认每批在同一列表 CDP 会话连续抓 4 页后归类；每批只做一次登录探测，页间随机等待 12–22 秒
+- 不设总翻页上限；`--min-details` 只作停翻目标；已映射帖全部开详情
 - `seen` 只按 `encrypt_job_id`；未导出详情记在 `unexported_details.json`
 - Windows 优先 Edge
 - 定岗映射评测约定 + `scripts/eval_position_mapping.py`

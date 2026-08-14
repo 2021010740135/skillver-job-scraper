@@ -77,11 +77,11 @@ MAX_BATCH_KEYWORDS = 8  # 单批最多岗位关键词（批间休息由人工控
 DEFAULT_POSITION_GAP_SEC = (480, 900)
 _ENCRYPT_JOB_ID_IN_LINK_RE = re.compile(r"/job_detail/([^./]+)\.html", re.IGNORECASE)
 
-# Skillver：最低详情数 / 页批 / 搜索预算（归类由 Agent 决策文件完成）
+# Skillver：最低详情数 / 四页连续批次 / 搜索预算（归类由 Agent 决策文件完成）
 DEFAULT_SKILLVER_MIN_DETAILS = 5
 DEFAULT_SKILLVER_MAX_MIN_DETAILS = 50
 DEFAULT_SKILLVER_MAX_DETAILS = 5  # deprecated alias of min-details
-DEFAULT_SKILLVER_PAGE_BATCH_SIZE = 1
+DEFAULT_SKILLVER_PAGE_BATCH_SIZE = 4
 DEFAULT_SKILLVER_MAX_PAGES = 8  # unused as a flip cap; kept for older callers
 MULTI_SELECT_FILTER_KEYS = ("experience", "scale")
 _ANON_COMPANY_RE = re.compile(r"^(某.+|匿名.*|保密.*)$")

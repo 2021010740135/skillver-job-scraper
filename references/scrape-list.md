@@ -2,7 +2,7 @@
 
 脚本：`scripts/scrape_list.py`
 
-按 `--query` 往 BOSS 搜索框输入（公司名、岗名或任意词）。默认**每次只抓 1 页**。规则过滤猎头 / 人力资源服务 / 匿名空公司 / **全局 seen 已见**。**不**在这一步丢掉实习或日薪卡片。不设翻页上限：本页有卡片则给出 `next_list_start_page`，是否继续由编排方按累计映射数决定。
+按 `--query` 往 BOSS 搜索框输入（公司名、岗名或任意词）。默认每批在**一次进程、一次登录探测、同一列表 CDP 会话**中连续抓 4 页，页间随机等待 12–22 秒。规则过滤猎头 / 人力资源服务 / 匿名空公司 / **全局 seen 已见**。**不**在这一步丢掉实习或日薪卡片。不设总翻页上限：本批有卡片则给出 `next_list_start_page`，是否继续下一批由编排方按累计映射数决定。
 
 ## 命令
 
@@ -11,7 +11,7 @@ python3 scripts/scrape_list.py \
   --query "阶跃星辰" \
   --city 上海 \
   --list-start-page 1 \
-  --page-batch-size 1 \
+  --page-batch-size 4 \
   --batch-index 1
 # --position-name 是 --query 的别名，不必是 catalog 原名
 # 可选筛选（对应页面下拉；experience/scale 可逗号或重复）：
@@ -29,7 +29,7 @@ python3 scripts/scrape_list.py \
 
 列表卡片字段（白名单）：`title` `boss_name` `boss_title` `salary` `location` `tags` `encrypt_job_id` `job_link` `security_id` `lid`。
 
-记下 `next_list_start_page`（`null`/缺失 = 本页无卡片，不要再翻）。`jobs` 可为空。
+记下 `next_list_start_page`（`null`/缺失 = 本批无卡片，不要再翻）。`jobs` 可为空。
 
 ## 默认值
 
@@ -37,7 +37,7 @@ python3 scripts/scrape_list.py \
 |----|------|
 | `--city` | `上海` |
 | `--pages` | 不设（本调用只抓 `--page-batch-size` 页） |
-| `--page-batch-size` | `1` |
+| `--page-batch-size` | `4` |
 | `--list-start-page` | `1` |
 | `--batch-index` | `1` |
 | `--seen` | `data/seen_jobs.json` |

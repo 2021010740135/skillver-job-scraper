@@ -50,7 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="本调用最多抓到第几页；默认只抓 --list-start-page 起的 --page-batch-size 页，不设翻页上限",
     )
-    p.add_argument("--page-batch-size", type=int, default=DEFAULT_SKILLVER_PAGE_BATCH_SIZE)
+    p.add_argument(
+        "--page-batch-size",
+        type=int,
+        default=DEFAULT_SKILLVER_PAGE_BATCH_SIZE,
+        help="本次在同一 CDP 会话中连续抓取的页数（默认 4）",
+    )
     p.add_argument("--list-start-page", type=int, default=1)
     p.add_argument("--batch-index", type=int, default=1)
     p.add_argument("--output", default=None, help="jobs.json")

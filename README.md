@@ -15,7 +15,7 @@
 
 - 🤖 **Agent Skill 友好** — 闸门只有登录 / CSV 核验，不依赖脚本内 LLM / `.env`
 - 🎯 **自由搜索 + 58 岗映射** — `--query` 进搜索框；归类对上 catalog 任一标准岗即开详情
-- 📄 **按页归类、详情全开** — 每抓 1 页就映射；不够且还能翻页就继续，不设翻页上限；最后一页多出来的已映射帖全部开详情
+- 📄 **四页连续批次、详情全开** — 每批一次登录探测，同一列表 CDP 会话连续抓 4 页后映射；不够且还能翻页就继续，不设总翻页上限；最后一批多出来的已映射帖全部开详情
 - 💾 **落盘不丢数据** — 列表每页写、详情每条写、seen 按 id 去重；未进 CSV 的详情记在 `unexported_details.json`
 - 🧩 **分步可控** — 浏览器 / 列表 / 清洗 A / 归类 / 详情 / 清洗 B / 导出，各司一职
 - 🌐 **隔离浏览器 profile** — 不碰主浏览器；Windows 先 Edge，没有再用 Chrome
@@ -46,10 +46,10 @@ cd skillver-job-scraper
 python3 scripts/chrome_cdp.py --check --cdp-port 9222
 python3 scripts/chrome_cdp.py --setup-chrome
 
-# 3. 抓 1 页列表（可按需改 --query）
+# 3. 同一列表会话连续抓 4 页（可按需改 --query）
 python3 scripts/scrape_list.py \
   --query "阶跃星辰" --city 上海 \
-  --list-start-page 1 --page-batch-size 1 --batch-index 1
+  --list-start-page 1 --page-batch-size 4 --batch-index 1
 python3 scripts/clean_classify_input.py \
   --input data/阶跃星辰/list_batch_1.json \
   --output data/阶跃星辰/classify_input_1.json
@@ -79,11 +79,11 @@ python3 scripts/export_skillver_csv.py \
 Step 0  安装 skill（references/install.md）
 Step 1  锁定 --query（任意搜索词）、城市、--min-details（停翻页的最低映射数）
 Step 2  chrome_cdp --check / --setup-chrome     登录闸门
-Step 3  循环（映射数不够且还有下一页则继续，不设翻页上限）：
-        scrape_list（每次 1 页）→ list_batch_P.json
-        → clean_classify_input → classify_input_P.json
-        → Agent 写 classify_decisions_P.json（最多 3 次；失败则停、不开详情）
-        → 累计 position_name != null；不够且有 next_list_start_page → P+=1
+Step 3  按批循环（映射数不够且还有下一页则继续，不设总翻页上限）：
+        scrape_list（每批同一列表会话连续 4 页）→ list_batch_B.json
+        → clean_classify_input → classify_input_B.json
+        → Agent 写 classify_decisions_B.json（最多 3 次；失败则停、不开详情）
+        → 累计 position_name != null；不够且有 next_list_start_page → 下一批
 Step 4  scrape_details 一次传入全部 decisions；已映射帖全部开详情（不按 --min-details 截断）
 Step 5  clean_details → export_skillver_csv（先 --dry-run）
 Step 6  交付核验：给出 CSV 路径，等用户「CSV 已核验」
@@ -107,7 +107,7 @@ Step 6  交付核验：给出 CSV 路径，等用户「CSV 已核验」
 |---|---|
 | `--query` | 搜索词（任意）；`--position-name` 只是它的别名 |
 | `--city` | 城市中文名或代码（默认上海），建议始终带上 |
-| `--list-start-page` / `--page-batch-size` / `--batch-index` | 默认每次 1 页；`--pages` 不作硬上限 |
+| `--list-start-page` / `--page-batch-size` / `--batch-index` | 默认每批连续 4 页；`--pages` 不作总翻页硬上限 |
 | `--min-details` | 停翻页的最低映射数（默认 5，上限 50） |
 | `--classify-input` + `--details-from-decisions` | 按 Agent 决策开详情（可多个 decisions 文件） |
 | `--cdp-port` | CDP 调试端口（默认 9222） |
@@ -154,7 +154,7 @@ Step 6  交付核验：给出 CSV 路径，等用户「CSV 已核验」
 
 | 版本 | 增加了什么 | 贡献者 |
 |---|---|---|
-| **1.0.0（最初版本）** | 标准岗主路径定型：拆开的 CLI、自由搜索 `--query`、58 岗全映射、按页归类、详情全开、`seen` 只按 id、`unexported_details.json`、Windows 优先 Edge | [2021010740135](https://github.com/2021010740135) |
+| **1.0.0（最初版本）** | 标准岗主路径定型：拆开的 CLI、自由搜索 `--query`、58 岗全映射、四页连续批次归类、详情全开、`seen` 只按 id、`unexported_details.json`、Windows 优先 Edge | [2021010740135](https://github.com/2021010740135) |
 | 1.0.0 | 定岗映射评测约定 + `scripts/eval_position_mapping.py`；README 章节版式（特性 / 循环 / FAQ） | [aotedijia](https://github.com/aotedijia)（臭臭） |
 
 新版本合入后在本表顶部追加一行。

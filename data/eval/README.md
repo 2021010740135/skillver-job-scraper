@@ -7,7 +7,10 @@
 
 | 文件 | 说明 |
 |------|------|
-| `skillver_position_route_v1.json` | 评测集（`items[].gold_*`） |
+| `skillver_position_route_v1.json` | 分流评测集（列表 → 录取/拒绝；`items[].gold_*`） |
+| `skillver_position_mapping_v1.json` | **定岗映射评测集**（用户叫法 → 58 岗 / 拒绝） |
+| `scripts/eval_position_route.py` | 分流指标脚本（FPR / Precision@accept） |
+| `scripts/eval_position_mapping.py` | 定岗映射指标脚本（岗名准确率 / 误收率） |
 | 本 README | 标注约定 + 主指标 |
 
 契约：`references/company-job-match.md`。岗名必须是 `data/skillver/position_catalog.json` 原名或 `null`。
@@ -68,3 +71,40 @@ python3 scripts/eval_position_route.py \
 ## 扩充样本
 
 往 `items` 追加即可（任意公司列表字段 + 人工 `gold_*`）。保持 `id` 稳定；不要把某次模型 `score` 当作金标。
+
+---
+
+## 定岗映射评测集（`skillver_position_mapping_v1.json`）
+
+测**用户叫法/自然语言 → 58 标准岗**的映射准确率（与分流评测互补：分流测"录不录"，这里测"归哪个岗"）。
+
+### 字段
+
+| 字段 | 含义 |
+|------|------|
+| `input` | 用户叫法/自然语言描述（如「搞机器学习的岗位」） |
+| `gold_position_name` | 应映射的 catalog 原名；应拒时为 `null` |
+| `kind` | `alias`（规则表应唯一命中）· `semantic`（规则零命中，语义兜底负责）· `reject`（应拒）· `ambiguous`（多候选歧义，线上走人工确认，**自动评测跳过**） |
+| `label_status` | `draft`（初稿）→ `human`（人工确认，正式金标） |
+
+### 指标（仅两个）
+
+1. **岗名准确率 position_accuracy**：`pred == gold` 的条数 / 可评测条数（`kind != ambiguous`）
+2. **误收率 false_accept_rate**：金标应拒（null）但预测录取 / 应拒总数
+
+### 怎么跑
+
+预测 JSON 形状同 `match_scores`（`results[].id` / `position_name` / `score`），
+`position_name` 为空视为预测拒绝；缺失 id 视为拒绝。
+
+```bash
+python3 scripts/eval_position_mapping.py \
+  --gold data/eval/skillver_position_mapping_v1.json \
+  --pred data/yatn/exports/pred_map.json
+```
+
+### 扩充样本
+
+`items` 追加即可。`alias` 类可从 `position_aliases.json` 每岗取代表叫法；
+`semantic` / `reject` / `ambiguous` 手工补充真实用户说法。保持 `id` 稳定；
+`gold_position_name` 必须是 `position_catalog.json` 原名或 `null`。

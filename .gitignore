@@ -45,8 +45,7 @@ data/skillver/exports/*
 !data/skillver/exports/.gitkeep
 data/skillver/eval/*
 !data/skillver/eval/.gitkeep
-data/skillver/company_uscc_cache.json
-data/skillver/uscc_screenshots/
+data/skillver/task_state_*.json
 data/exports/
 
 # YATN company-job scrape: commit companies.csv; ignore local outputs.
@@ -71,3 +70,6 @@ Thumbs.db
 !AGENTS.md
 
 ./zcode
+uv.lock
+.workbuddy/memory/2026-08-12.md
+data/eval/skillver_position_mapping_v1.json

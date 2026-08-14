@@ -63,15 +63,13 @@ class RowMappingTests(unittest.TestCase):
         row, reason = ex.detail_to_row(detail, self.position)
         self.assertIsNone(reason)
         self.assertEqual(list(row.keys()), ex.CSV_HEADERS)
-        self.assertEqual(row["企业名称"], "示例科技")
         self.assertEqual(row["招聘品牌名"], "示例科技")
-        self.assertEqual(row["统一社会信用代码"], "")
         self.assertEqual(row["所在城市"], "上海")
         self.assertEqual(row["一级编号"], "J02")
         self.assertEqual(row["一级岗位名称"], "AI 大模型工程师")
         self.assertEqual(row["岗位名称"], "预训练算法研究员/工程师")
         self.assertNotIn("\n", row["岗位描述"])
-        self.assertEqual(row["岗位base地"], "上海")
+        self.assertEqual(row["岗位base地"], "上海·徐汇区·漕河泾")
         self.assertEqual(row["岗位薪资"], "40K-70K")
         self.assertRegex(row["岗位薪资"], r"^\d+K-\d+K$")
 
@@ -120,7 +118,22 @@ class RowMappingTests(unittest.TestCase):
         row, reason = ex.detail_to_row(detail, self.position)
         self.assertIsNone(reason)
         self.assertEqual(row["所在城市"], "上海")
-        self.assertEqual(row["岗位base地"], "上海")
+        self.assertEqual(row["岗位base地"], "上海·浦东新区")
+
+    def test_location_with_embedded_middle_dot_extracts_city(self):
+        """Address like 上海浦东新区…T5(模力·栈)T5 yields 上海, not the pre-dot prefix."""
+        detail = {
+            "company": "小鹏汽车",
+            "location": "上海浦东新区张江科学之门T5(模力·栈)T5（小鹏汽车）",
+            "salary": "40K-70K",
+            "jd": "这是一段足够长的岗位描述用于通过长度检查。",
+        }
+        row, reason = ex.detail_to_row(detail, self.position)
+        self.assertIsNone(reason)
+        self.assertEqual(row["所在城市"], "上海")
+        self.assertEqual(
+            row["岗位base地"], "上海浦东新区张江科学之门T5(模力·栈)T5（小鹏汽车）"
+        )
 
     def test_empty_location_without_fallback_skipped(self):
         detail = {
@@ -172,8 +185,6 @@ class RowMappingTests(unittest.TestCase):
     def test_write_csv_does_not_quote_jd(self):
         rows = [
             {
-                "企业名称": "酷哇科技",
-                "统一社会信用代码": "",
                 "招聘品牌名": "酷哇科技",
                 "所在城市": "上海",
                 "一级编号": "J01",
@@ -190,36 +201,6 @@ class RowMappingTests(unittest.TestCase):
             text = out.read_text(encoding="utf-8-sig")
             self.assertNotIn('"', text)
 
-    def test_apply_uscc_cache_rewrites_legal_name(self):
-        rows = [
-            {
-                "企业名称": "得物App",
-                "统一社会信用代码": "",
-                "招聘品牌名": "得物App",
-                "所在城市": "上海",
-                "一级编号": "J01",
-                "一级岗位名称": "AI 算法工程师",
-                "岗位名称": "机器学习工程师",
-                "岗位描述": "足够长的岗位描述文本啊啊啊啊啊",
-                "岗位base地": "上海",
-                "岗位薪资": "40K-70K",
-            }
-        ]
-        cache = ex.empty_uscc_cache()
-        cache["by_brand"]["得物App"] = {
-            "uscc": "91310000351008055W",
-            "legal_name": "上海得物信息集团有限公司",
-        }
-        cache["by_uscc"]["91310000351008055W"] = {
-            "legal_name": "上海得物信息集团有限公司",
-            "brands": ["得物App"],
-        }
-        out, hits = ex.apply_uscc_cache_to_rows(rows, cache)
-        self.assertEqual(hits, 1)
-        self.assertEqual(out[0]["企业名称"], "上海得物信息集团有限公司")
-        self.assertEqual(out[0]["统一社会信用代码"], "91310000351008055W")
-        self.assertEqual(out[0]["招聘品牌名"], "得物App")
-
     def test_default_output_path_dated(self):
         path = ex.default_output_path()
         self.assertTrue(path.name.startswith("job_"))
@@ -229,8 +210,6 @@ class RowMappingTests(unittest.TestCase):
     def test_cleanup_dedupes_company_position(self):
         rows = [
             {
-                "企业名称": "得物App",
-                "统一社会信用代码": "",
                 "招聘品牌名": "得物App",
                 "所在城市": "上海",
                 "一级编号": "J01",
@@ -241,8 +220,6 @@ class RowMappingTests(unittest.TestCase):
                 "岗位薪资": "40K-70K",
             },
             {
-                "企业名称": "得物App",
-                "统一社会信用代码": "",
                 "招聘品牌名": "得物App",
                 "所在城市": "上海",
                 "一级编号": "J01",
@@ -333,7 +310,6 @@ class CliExportTests(unittest.TestCase):
             with out_path.open(encoding="utf-8-sig", newline="") as f:
                 reader = list(csv.DictReader(f))
             self.assertEqual(len(reader), 1)
-            self.assertEqual(reader[0]["企业名称"], "示例科技")
             self.assertEqual(reader[0]["招聘品牌名"], "示例科技")
             self.assertEqual(reader[0]["岗位薪资"], "40K-70K")
             self.assertEqual(reader[0]["岗位名称"], "预训练算法研究员/工程师")

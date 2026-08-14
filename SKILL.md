@@ -6,10 +6,10 @@ description: >
   用户提到 Skillver、标准岗、--position-name、按企业采集、YATN、职位采集、
   BOSS直聘、zhipin、或要从详情导出招聘 CSV 时，应优先使用本 skill；即使未点名
   skill 名，只要任务属于该流水线也应触发。用户用自然语言描述目标岗位
-  （如智能体、AIGC、MLOps）时，本 skill 负责先规则后语义映射到 58 标准岗。
+  （如智能体、AIGC、MLOps）时，本 skill 负责判采集范围并直接输出 58 岗之一（或明确拒绝）。
   本 skill 必须人机协同：登录数据源、核验最终 CSV。
   禁止用企查查/Selenium 批量爬工商；禁止在脚本内再调 DeepSeek 或其它 API 做归类。
-version: 2.10.0
+version: 2.12.0
 author: skillver-job-scraper
 license: MIT
 platforms: [macos, linux, windows]
@@ -20,7 +20,7 @@ metadata:
 
 # Skillver 职位采集（skillver-job-scraper）
 
-面向 WorkBuddy / Hermes / Claude Code **或任意 Agent** 的 **公开职位 → Skillver CSV** 执行手册（最小稳定集，v2.7.0）。当前采集适配为 BOSS直聘；编排与目录按 Skillver 标准岗流水线组织。
+面向 WorkBuddy / Hermes / Claude Code **或任意 Agent** 的 **公开职位 → Skillver CSV** 执行手册（最小稳定集，v2.12.0）。当前采集适配为 BOSS直聘；编排与目录按 Skillver 标准岗流水线组织。
 
 **只读本文件 + `references/classify-decisions.md` 即可跑完主路径。** 不要另写爬虫，不要在脚本内调 DeepSeek。
 
@@ -42,10 +42,10 @@ metadata:
 2. **优先复用 scripts + references** — 不要另写爬虫或脚本内 LLM
 3. **标准岗唯一主路径** — 必须 `--position-name`（`position_catalog.json` 原名）
 4. **归类只用 Agent 内置模型** — 按 `references/classify-decisions.md` 写决策 JSON
-5. **抓取流程人机闸门仅两处** — `WAIT_LOGIN` / `WAIT_CSV_REVIEW`（归类成功后**不要**加人闸门，直接开详情）；定岗歧义确认属 Step 1 前置交互，不算抓取闸门
+5. **抓取流程人机闸门仅两处** — `WAIT_LOGIN` / `WAIT_CSV_REVIEW`（归类成功后**不要**加人闸门，直接开详情）；定岗范围判断属 Step 1 前置交互，不算抓取闸门
 6. **稳优先于快** — 详情间隔保持脚本默认；限流/验证码则停，不硬闯
 7. **社招主路径不处理日薪**（`元/天`）— 导出侧会跳过无法解析为 `N K-M K` 的薪资
-8. **定岗先规则后语义** — 用户需求先查 `position_aliases.json`：唯一命中直接定岗；歧义列候选请用户确认并回写规则表；零命中才由内置模型语义映射
+8. **定岗 = Agent 语义判断** — 先判「是否属于采集范围」（见「采集边界」）：范围外**明确拒绝**、不硬映射；范围内**直接输出唯一最终答案**（`position_catalog.json` 原名，58 岗之一）；边界模糊询问用户或宁缺毋滥
 
 ## Scripts guide
 
@@ -67,7 +67,7 @@ REF_COMPANY=references/company-job-match.md
 | `data/yatn/companies.csv` | YATN 企业名单（S/A） |
 | `data/city_codes.json` | 城市码 |
 | `data/skillver/position_catalog.json` | 58 标准岗 |
-| `data/skillver/position_aliases.json` | 定岗规则表：用户叫法/关键词 → 标准岗原名（先规则后语义） |
+| `data/skillver/position_aliases.json` | 定岗规则表（2.12 起定岗改 Agent 语义判断，本表保留作参考/评测） |
 
 ### 关键默认值（以脚本为准）
 
@@ -133,6 +133,8 @@ python3 "$SCRAPER" --stop-chrome --cdp-port 9222
 python3 "$SCRAPER" --list-cities 上海
 ```
 
+CDP 协议兼容 Chrome / Edge（`--setup-chrome` 按平台自动探测，Chrome 优先、Edge 兜底）；Firefox / Safari 不支持。
+
 ### 抓取分步
 
 ```bash
@@ -195,7 +197,7 @@ python3 "$EXPORT" \
 4. `results` 的 `id` 集合与输入 `jobs[].id` **相等**（不多不少）
 5. 每个 `position_name` 是 catalog **原名**或 JSON `null`
 
-失败：最多重试 **3** 次 → 打断点，提示用户「归类失败，修好后回复继续」→ **不开详情、不用规则顶替归类**。
+失败：最多重试 **3** 次 → 打断点，提示用户「归类失败，修好后回复继续」→ **不开详情、不用简单规则顶替归类**。
 
 输入侧脚本可能写入顶层 `city`、`jobs[].location`——**归类可忽略**；详情/导出会用。完整字段与路由语义见 `references/classify-decisions.md`。
 
@@ -207,18 +209,29 @@ python3 "$EXPORT" \
 
 - **目的**：锁定本轮跑什么，避免跑错岗或漏闸门
 - **命令**：无（问用户 / 读需求）
-- **定岗匹配（先规则后语义）**：
-  1. 读 `data/skillver/position_aliases.json`，把用户叫法/关键词做规则匹配（归一化后精确/包含比对）
-  2. **消歧优先最长别名**：多候选时，若某命中别名是另一命中别名的**严格超串**（如「具身智能研究」⊃「具身智能」），淘汰较短者——更具体的别名胜出
-  3. **唯一命中** → 直接取 catalog 原名
-  4. **歧义（仍多候选）** → 列出候选岗，**用户手动确认**；确认后把「该叫法 → 所选岗」回写规则表（追加去重，防重复条目）
-  5. **零命中** → 由内置模型语义映射到 catalog 原名（兜底）
+- **定岗（Agent 语义判断，一步输出最终答案）**：
+  1. **范围判断（入口）**：先判用户岗位需求是否属于采集范围（判据见下「采集边界」小节）
+     - **范围外**（无论叫法多像「工程师」：通用 Java 后端、普通销售/运营、行政/HR/财务、设计/剪辑等）→ **明确拒绝**，告知用户「该岗位不在采集范围」，**不硬映射**
+     - **边界模糊**（拿不准属不属于范围）→ **询问用户确认**；确认不了则按宁缺毋滥拒绝
+  2. **输出唯一最终答案**：属于范围内 → Agent 直接输出 `position_name`（`position_catalog.json` 原名之一，58 岗），作为后续爬虫的 `--position-name` 与搜索词
+  3. 最终答案必须为 catalog 原名；脚本 `resolve_position` 严格校验兜底
 - **产出 / 成功判据**：确认下列全部有值或明确「不需要」  
   - `position_name`（catalog 原名；必须来自上述定岗流程）  
   - 城市（默认上海）与可选筛选  
   - `--min-details`（默认 5）  
   - 是否只要导出（可跳过抓取）
 - **失败 / 人机闸门**：岗名不在 catalog → 停，让用户改名；不要发明岗名
+
+### 采集边界（定岗判据）
+
+用户岗位输入/需求须符合：**围绕 AI 模型、智能体（Agent）、大模型或机器人/具身智能技术及其产品全链路的岗位**——从算法研发（机器学习、CV、大模型预训练到评测、多模态、语音）、AI 应用开发、数据工程、MLOps 基础设施、安全合规，到 AI 产品经理、解决方案/售前/交付、以及面向 AI 产品的商务拓展与增长等，**都属于范围内**，用户输入会被映射到这些岗之一；反之，**无论岗位叫法是什么（哪怕是"工程师"）**，只要其职责不围绕 AI/机器人技术或其产品（如通用 Java 后端、普通销售运营、行政财务、设计剪辑等），就**明确拒绝、不硬塞**，边界模糊时宁可拒绝或询问用户（**宁缺毋滥**）。
+
+判断要点：
+
+- **判据不是「是不是销售/运营」，而是「是否围绕 AI / 机器人技术或其产品」**：J11「AI 商业化」族的 AI 商务拓展、AI 增长营销在范围内；普通销售/运营不在
+- 范围内 12 族概览：J01 算法 / J02 大模型 / J03 AI 应用与 Agent / J04 多模态 / J05 数据 / J06 基础设施 MLOps / J07 机器人具身智能（22 岗）/ J08 安全合规 / J09 AI 产品 / J10 方案售前交付 / J11 AI 商业化 / J99 跨方向
+- 范围外典型信号：通用职能（非 AI 的销售·运营·行政·HR·财务·客服·法务）、通用技术（普通后端·前端·DBA·运维·通用测试）、其他（设计·文案·剪辑·非 AI 直播·传统行业岗）
+- 拒绝时**明确告知用户原因**（「该岗位不在采集范围」），不静默丢弃
 
 ### Step 2–3：环境与登录
 
@@ -291,7 +304,7 @@ python3 "$SCRAPER" \
 - **产出 / 成功判据**：  
   - `data/skillver/exports/classify_decisions_<岗>_<B>.json`  
   - 通过上文「强制自检」
-- **失败 / 人机闸门**：最多 **3** 次重试 → 打断点（等用户「继续」）；**不开详情、不用规则顶替**  
+- **失败 / 人机闸门**：最多 **3** 次重试 → 打断点（等用户「继续」）；**不开详情、不用简单规则顶替**  
   - **不要**在此处加 `WAIT_*` 人闸门
 
 #### 4b-3）开详情
@@ -426,7 +439,7 @@ Skill 包**必须**含 `references/` + `requirements.txt`。
 
 1. `--min-details` = 本轮新增目标；默认 5、最大 50；Agent 循环，脚本不自动循环
 2. 标准岗分步三选一；归类契约见 `references/classify-decisions.md`
-3. 抓取流程人机闸门只有登录 / CSV 两处；定岗歧义确认在 Step 1 前置完成
-4. 定岗先查 `position_aliases.json`：唯一命中直接定岗；歧义列候选请用户确认并回写规则表；零命中才语义映射
+3. 抓取流程人机闸门只有登录 / CSV 两处；定岗范围判断在 Step 1 前置完成
+4. 定岗由 Agent 语义判断：先判采集范围（范围外明确拒绝、不硬映射）；范围内直接输出 catalog 原名最终答案（58 岗之一）
 5. 限流/验证码：停止并提示用户
 6. 不要把分析摘要、企查查、脚本内 DeepSeek 加回最小集

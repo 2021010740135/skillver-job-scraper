@@ -1,0 +1,779 @@
+{
+  "schema_version": 1,
+  "name": "定岗映射评测集 v1",
+  "scope": "用户叫法/自然语言 → 58 标准岗（catalog 原名）或 null（拒绝）",
+  "indicators": [
+    "position_accuracy",
+    "false_accept_rate"
+  ],
+  "generated_from": "data/skillver/position_aliases.json",
+  "items": [
+    {
+      "id": "map_001",
+      "input": "业务分析师岗位",
+      "gold_position_name": "AI业务分析师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_002",
+      "input": "ai交付岗位",
+      "gold_position_name": "AI交付/前向部署工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_003",
+      "input": "ai产品经理岗位",
+      "gold_position_name": "AI产品经理(平台/商业)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_004",
+      "input": "售前岗位",
+      "gold_position_name": "AI售前工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_005",
+      "input": "商务拓展岗位",
+      "gold_position_name": "AI商务拓展经理(含客户成功)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_006",
+      "input": "ai增长岗位",
+      "gold_position_name": "AI增长/市场营销经理",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_007",
+      "input": "ai安全岗位",
+      "gold_position_name": "AI安全架构师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_008",
+      "input": "ai平台岗位",
+      "gold_position_name": "AI平台工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_009",
+      "input": "ai应用岗位",
+      "gold_position_name": "AI应用工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_010",
+      "input": "finops岗位",
+      "gold_position_name": "AI成本工程师(FinOps)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_011",
+      "input": "技术项目经理岗位",
+      "gold_position_name": "AI技术项目经理",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_012",
+      "input": "特征平台岗位",
+      "gold_position_name": "AI数据基建/特征平台",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_013",
+      "input": "数据管道岗位",
+      "gold_position_name": "AI数据工程师(管道/治理)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_014",
+      "input": "数据质量岗位",
+      "gold_position_name": "AI数据质量工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_015",
+      "input": "ai合规岗位",
+      "gold_position_name": "AI治理/合规与风险",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_016",
+      "input": "知识图谱岗位",
+      "gold_position_name": "AI知识工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_017",
+      "input": "ai研究员岗位",
+      "gold_position_name": "AI研究员/科学家",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_018",
+      "input": "ai自动化岗位",
+      "gold_position_name": "AI自动化架构师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_019",
+      "input": "ai解决方案岗位",
+      "gold_position_name": "AI解决方案架构师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_020",
+      "input": "agent岗位",
+      "gold_position_name": "Agent工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_021",
+      "input": "计算机视觉岗位",
+      "gold_position_name": "CV算法工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_022",
+      "input": "gpu调度岗位",
+      "gold_position_name": "GPU/算力调度工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_023",
+      "input": "mlops岗位",
+      "gold_position_name": "MLOps/LLMOps工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_024",
+      "input": "伺服驱动岗位",
+      "gold_position_name": "伺服驱动工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_025",
+      "input": "具身智能研究岗位",
+      "gold_position_name": "具身智能研究工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_026",
+      "input": "具身硬件岗位",
+      "gold_position_name": "具身智能硬件工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_027",
+      "input": "具身智能岗位",
+      "gold_position_name": "具身智能算法工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_028",
+      "input": "后训练岗位",
+      "gold_position_name": "后训练与对齐工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_029",
+      "input": "多模态岗位",
+      "gold_position_name": "多模态/AIGC算法工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_030",
+      "input": "模型评测岗位",
+      "gold_position_name": "大模型评测与合成数据专家",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_031",
+      "input": "对话产品岗位",
+      "gold_position_name": "对话式/Agent产品经理",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_032",
+      "input": "推理优化岗位",
+      "gold_position_name": "推理优化工程师(算法层)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_033",
+      "input": "推理部署岗位",
+      "gold_position_name": "推理部署工程师(工程层)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_034",
+      "input": "推荐算法岗位",
+      "gold_position_name": "智能搜索/推荐工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_035",
+      "input": "机器人ai产品岗位",
+      "gold_position_name": "机器人AI产品工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_036",
+      "input": "机器人产品岗位",
+      "gold_position_name": "机器人产品经理",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_037",
+      "input": "机器人仿真岗位",
+      "gold_position_name": "机器人仿真与迁移工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_038",
+      "input": "机器人基础平台岗位",
+      "gold_position_name": "机器人基础平台工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_039",
+      "input": "机器人安全岗位",
+      "gold_position_name": "机器人安全系统工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_040",
+      "input": "导航规划岗位",
+      "gold_position_name": "机器人导航规划工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_041",
+      "input": "感知算法岗位",
+      "gold_position_name": "机器人感知算法工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_042",
+      "input": "执行器岗位",
+      "gold_position_name": "机器人执行器工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_043",
+      "input": "机器人数据岗位",
+      "gold_position_name": "机器人数据工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_044",
+      "input": "机器人系统架构岗位",
+      "gold_position_name": "机器人系统架构师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_045",
+      "input": "机器人视觉传感器岗位",
+      "gold_position_name": "机器人视觉传感器工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_046",
+      "input": "机器人解决方案岗位",
+      "gold_position_name": "机器人解决方案工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_047",
+      "input": "运动控制岗位",
+      "gold_position_name": "机器人运动控制工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_048",
+      "input": "机器人项目管理岗位",
+      "gold_position_name": "机器人项目经理",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_049",
+      "input": "机器人验证岗位",
+      "gold_position_name": "机器人验证测试工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_050",
+      "input": "机器学习岗位",
+      "gold_position_name": "机器学习工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_051",
+      "input": "机械臂岗位",
+      "gold_position_name": "机械臂结构设计工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_052",
+      "input": "红队岗位",
+      "gold_position_name": "模型安全红队/对抗检测",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_053",
+      "input": "模型架构岗位",
+      "gold_position_name": "模型架构研究员",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_054",
+      "input": "灵巧手岗位",
+      "gold_position_name": "灵巧手工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_055",
+      "input": "视频生成岗位",
+      "gold_position_name": "视频/数字人生成工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_056",
+      "input": "触觉传感器岗位",
+      "gold_position_name": "触觉/力觉传感器工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_057",
+      "input": "语音岗位",
+      "gold_position_name": "语音AI工程师(含合成)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_058",
+      "input": "预训练岗位",
+      "gold_position_name": "预训练算法研究员/工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_059",
+      "input": "搞强化学习训练策略的",
+      "gold_position_name": "机器学习工程师",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_060",
+      "input": "做模型剪枝量化和加速的",
+      "gold_position_name": "推理优化工程师(算法层)",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_061",
+      "input": "搭 RAG 检索增强管线的",
+      "gold_position_name": "Agent工程师",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_062",
+      "input": "做语音克隆合成的",
+      "gold_position_name": "语音AI工程师(含合成)",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_063",
+      "input": "给机器人做手眼标定的",
+      "gold_position_name": "机器人视觉传感器工程师",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_064",
+      "input": "HR 招聘专员",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_065",
+      "input": "大客户销售",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_066",
+      "input": "前台行政",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_067",
+      "input": "通用 Java 后端（非 AI 业务）",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_068",
+      "input": "财务会计",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_069",
+      "input": "AI大模型相关的岗位",
+      "gold_position_name": null,
+      "kind": "ambiguous",
+      "note": "预训练/后训练/推理优化/评测 多候选，须人工确认",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_070",
+      "input": "机器人硬件相关",
+      "gold_position_name": null,
+      "kind": "ambiguous",
+      "note": "具身硬件/视觉传感器/执行器/伺服驱动 多候选，须人工确认",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_071",
+      "input": "智能体开发工程师",
+      "gold_position_name": "Agent工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_072",
+      "input": "做智能体工作流的",
+      "gold_position_name": "Agent工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_073",
+      "input": "推荐系统工程师",
+      "gold_position_name": "智能搜索/推荐工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_074",
+      "input": "搜索推荐算法工程师",
+      "gold_position_name": "智能搜索/推荐工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_075",
+      "input": "图像算法工程师",
+      "gold_position_name": "CV算法工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_076",
+      "input": "文生图模型训练",
+      "gold_position_name": "多模态/AIGC算法工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_077",
+      "input": "数字人建模",
+      "gold_position_name": "视频/数字人生成工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_078",
+      "input": "语音识别工程师",
+      "gold_position_name": "语音AI工程师(含合成)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_079",
+      "input": "RLHF 对齐工程师",
+      "gold_position_name": "后训练与对齐工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_080",
+      "input": "大模型推理加速",
+      "gold_position_name": "推理优化工程师(算法层)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_081",
+      "input": "MLOps 平台搭建",
+      "gold_position_name": "MLOps/LLMOps工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_082",
+      "input": "模型部署上线",
+      "gold_position_name": "推理部署工程师(工程层)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_083",
+      "input": "GPU 算力调度",
+      "gold_position_name": "GPU/算力调度工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_084",
+      "input": "特征平台开发",
+      "gold_position_name": "AI数据基建/特征平台",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_085",
+      "input": "模型安全评估",
+      "gold_position_name": "AI安全架构师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_086",
+      "input": "AI 合规审核",
+      "gold_position_name": "AI治理/合规与风险",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_087",
+      "input": "AI 产品经理",
+      "gold_position_name": "AI产品经理(平台/商业)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_088",
+      "input": "智能体产品经理",
+      "gold_position_name": "对话式/Agent产品经理",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_089",
+      "input": "售前工程师",
+      "gold_position_name": "AI售前工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_090",
+      "input": "客户成功经理",
+      "gold_position_name": "AI商务拓展经理(含客户成功)",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_091",
+      "input": "机械臂结构设计",
+      "gold_position_name": "机械臂结构设计工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_092",
+      "input": "SLAM 建图定位",
+      "gold_position_name": "机器人导航规划工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_093",
+      "input": "伺服电机驱动",
+      "gold_position_name": "伺服驱动工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_094",
+      "input": "灵巧手抓取",
+      "gold_position_name": "灵巧手工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_095",
+      "input": "触觉传感器选型",
+      "gold_position_name": "触觉/力觉传感器工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_096",
+      "input": "机器人仿真环境搭建",
+      "gold_position_name": "机器人仿真与迁移工程师",
+      "kind": "alias",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_097",
+      "input": "图像识别算法",
+      "gold_position_name": "CV算法工程师",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_098",
+      "input": "训练数据清洗",
+      "gold_position_name": "AI数据工程师(管道/治理)",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_099",
+      "input": "知识库问答机器人",
+      "gold_position_name": "AI知识工程师",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_100",
+      "input": "对话机器人开发",
+      "gold_position_name": "AI应用工程师",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_101",
+      "input": "LLM 效果评测",
+      "gold_position_name": "大模型评测与合成数据专家",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_102",
+      "input": "机器人抓取规划",
+      "gold_position_name": "机器人运动控制工程师",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_103",
+      "input": "模型量化压缩部署",
+      "gold_position_name": "推理部署工程师(工程层)",
+      "kind": "semantic",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_104",
+      "input": "短视频运营",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_105",
+      "input": "UI 设计师",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_106",
+      "input": "产品运营专员",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_107",
+      "input": "通用功能测试",
+      "gold_position_name": null,
+      "kind": "reject",
+      "label_status": "draft"
+    },
+    {
+      "id": "map_108",
+      "input": "大模型工程师",
+      "gold_position_name": null,
+      "kind": "ambiguous",
+      "label_status": "draft",
+      "note": "预训练/后训练/推理优化/评测 多候选，须人工确认"
+    },
+    {
+      "id": "map_109",
+      "input": "机器人算法工程师",
+      "gold_position_name": null,
+      "kind": "ambiguous",
+      "label_status": "draft",
+      "note": "具身智能/感知/导航/运动控制 多候选，须人工确认"
+    }
+  ]
+}

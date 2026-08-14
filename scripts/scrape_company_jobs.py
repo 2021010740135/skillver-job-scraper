@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-__version__ = "2.10.0"
+__version__ = "2.12.0"
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_COMPANIES = ROOT / "data" / "yatn" / "companies.csv"

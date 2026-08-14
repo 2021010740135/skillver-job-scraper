@@ -1,9 +1,9 @@
-# Skillver 职位采集 · Agent Skill v2.10.0
+# Skillver 职位采集 · Agent Skill v2.12.0
 
 ![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
-![Version](https://img.shields.io/badge/version-2.10.0-orange.svg)
+![Version](https://img.shields.io/badge/version-2.12.0-orange.svg)
 
 通过**本机已登录**的 Chrome / Edge（CDP 调试端口）采集公开职位，由 **Agent 内置模型**归类/打分，导出 Skillver CSV。面向 WorkBuddy / Hermes / Claude Code 等任意 Agent，也可纯命令行。当前数据源为 **BOSS直聘**。
 
@@ -14,7 +14,7 @@
 ## ✨ 特性
 
 - 🤖 **Agent Skill 友好** — 闸门清晰（登录 / CSV 核验），不依赖脚本内 LLM / `.env`
-- 🎯 **58 标准岗 + 定岗规则表** — `position_aliases.json` 170 条别名，先规则后语义，歧义人工确认回写
+- 🎯 **58 标准岗 + 语义定岗** — Agent 先判采集范围（AI/机器人领域），范围内直接输出 58 岗之一；范围外明确拒绝
 - 🔄 **断点续爬** — `task_state_<岗>.json` 自动记录进度，中断重启自动续爬
 - 💾 **落盘不丢数据** — 列表每页写、详情每条写、seen 每条更新
 - 🧩 **分步可控** — 标准岗 drain / list-only / details-from-decisions；企业路径 list → details → match → export
@@ -105,16 +105,15 @@ Step 5  交付核验                 Agent 给 CSV 路径，等用户「CSV 已�
 - 任何标准岗命令启动时**自动检测**上次状态并打印续爬提示（按是否达标给出建议）
 - 落盘保证：**列表每页写、详情每条写、seen 每条更新**——中断不丢已抓数据，重启后重跑同一条命令即按 seen 跳过已抓，只补剩余
 
-### 定岗：用户叫法 → 58 标准岗
+### 定岗：Agent 判断范围 → 输出唯一最终答案（58 岗之一 或 明确拒绝）
 
-用户用自然语言描述岗位时，按 `data/skillver/position_aliases.json`（58 岗全覆盖、170 条别名）做规则匹配：
+用户用自然语言描述岗位需求时，由 **Agent 语义判断**一步出结果，不做规则表匹配：
 
-1. **唯一命中** → 直接取 catalog 原名
-2. **消歧优先最长别名** — 多候选时若某命中别名是另一命中别名的严格超串（如「具身智能研究」⊃「具身智能」），淘汰较短者
-3. **仍多候选** → 列出候选，**用户手动确认**，选择回写规则表（下次同输入直接命中）
-4. **零命中** → Agent 内置模型语义映射
-
-脚本侧 `resolve_position` 仍**严格校验** catalog 原名，不合法直接拒绝——规则层只决定「传什么岗名」。
+1. **范围判断**：需求是否围绕 AI 模型 / 智能体 / 大模型 / 机器人 / 具身智能技术及其产品全链路？
+   - **范围外**（通用 Java 后端、普通销售运营、行政财务、设计剪辑等，无论叫法多像"工程师"）→ **明确拒绝**，不硬映射
+   - **边界模糊** → 询问用户确认；确认不了则宁缺毋滥拒绝
+2. **输出唯一最终答案**：属于范围内 → 直接输出 `position_name`（catalog 原名之一），作为 `--position-name` 与搜索词
+3. 最终答案必须为 catalog 原名；脚本 `resolve_position` 严格校验兜底
 
 ### 参数速查
 

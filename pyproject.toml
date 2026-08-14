@@ -1,6 +1,6 @@
 [project]
 name = "boss-zhipin-scraper"
-version = "2.10.0"
+version = "2.12.0"
 description = "Skillver 职位采集 — Chrome CDP + 标准岗分步 + Skillver CSV（当前含 BOSS 适配）"
 readme = "README.md"
 license = { text = "MIT" }

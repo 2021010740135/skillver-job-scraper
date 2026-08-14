@@ -34,27 +34,13 @@ docs/
 # Local analysis outputs (Excel / charts / Markdown reports)
 data/reports/
 
-# Skillver: commit catalog; ignore local run state / scrape / export outputs.
-# Keep directory placeholders via .gitkeep.
-data/skillver/seen_jobs.json
-data/skillver/jobs/*
-!data/skillver/jobs/.gitkeep
-data/skillver/details/*
-!data/skillver/details/.gitkeep
-data/skillver/exports/*
-!data/skillver/exports/.gitkeep
-data/skillver/eval/*
-!data/skillver/eval/.gitkeep
-data/skillver/task_state_*.json
+# Public assets stay tracked; ignore search-term crawl folders.
+data/*/
+!data/city_codes.json
+!data/position_catalog.json
+!data/eval/
+!data/eval/**
 data/exports/
-
-# YATN company-job scrape: commit companies.csv; ignore local outputs.
-data/yatn/jobs/*
-!data/yatn/jobs/.gitkeep
-data/yatn/details/*
-!data/yatn/details/.gitkeep
-data/yatn/exports/*
-!data/yatn/exports/.gitkeep
 
 # Local skill tooling config (baoyu-image-gen etc.)
 .baoyu-skills/
@@ -66,10 +52,7 @@ data/yatn/exports/*
 ._*
 Thumbs.db
 
-# 覆盖全局 gitignore 对 AGENTS.md 的忽略，本项目需要提交
+# 覆盖全局 gitignore �?AGENTS.md 的忽略，本项目需要提�?
 !AGENTS.md
 
 ./zcode
-uv.lock
-.workbuddy/memory/2026-08-12.md
-data/eval/skillver_position_mapping_v1.json

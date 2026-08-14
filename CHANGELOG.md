@@ -2,84 +2,147 @@
 
 本仓库以 **Skillver 职位采集**（`skillver-job-scraper`）为产品名。
 
+## 2.18.0
+
+### 按页映射、详情全开、未导出记账
+
+- 每抓 1 页列表就归类；累计映射数不够且还能翻页就继续，不设翻页上限
+- `--min-details` 只作停翻目标（最多 50）；最后一页多出来的已映射帖全部开详情
+- 站点映射不够时如实结束，不凑数
+- 详情成功写入 `data/unexported_details.json`；CSV 写成功后去掉，避免风控换来的详情浪费
+
+## 2.17.0
+
+### 去掉 pending 队列与 drain
+
+- 删除 `pending_details` / `pending_export`、`--drain-inventory`，以及按岗计数 / 队列入队等死代码
+- `seen` 只按 `encrypt_job_id` 去重；详情只开本批决策里对上的岗
+- 导出读本次 `details.json`，已 exported 的 id 跳过
+
+## 2.16.1
+
+### 导出不再按「一企一标准岗」丢行
+
+- 同一标准岗下可有多条 BOSS 帖；CSV 全部保留
+- 去重只认 `encrypt_job_id`
+
+## 2.16.0
+
+### 自由搜索词 + 58 岗全映射 + 全局 seen
+
+- `--query` 进搜索框，不必是 catalog 原名；`--position-name` 仅作别名
+- 归类对上 58 个标准岗任一即开详情，不再「本轮只入库一个岗」
+- 导出按每行自己的标准岗填 intent
+- 全局 `data/seen_jobs.json`（`encrypt_job_id`）在列表 / 归类 / 详情 / 导出去重；`null` 也落盘
+
+## 2.15.0
+
+### Windows 优先 Edge + Agent 安装文档
+
+- Windows 启停 CDP：先 Edge，没有再用 Chrome；不加浏览器开关
+- `--copy-login-state` 与 `--stop-chrome` 按同一顺序认 Edge / Chrome
+- 新增 `references/install.md`：Agent 只读文档即可把 skill 拷到本机，不另写安装脚本
+
+## 2.14.0
+
+### 拆 CLI + 两段清洗 + 瘦字段
+
+- 删除单体 `boss_cdp_raw.py` 以及 `--analysis` / `--keyword` 批跑 / 旧 list·detail CSV
+- 拆成独立 CLI：Chrome、列表、详情、清洗 A、清洗 B、导出
+- 清洗 A：`list_batch` → `classify_input`（只留归类字段；去掉 `security_id` / `lid` / `job_link`）
+- 清洗 B：详情只留导出字段
+- 清洗只丢多余键，不因实习 / 日薪丢卡片
+- `jobs.json` 仍保留 URL 字段，供详情 CLI 打开页面
+- `SKILL.md` 收成导航；细节拆成 7 份 `references/`
+
+## 2.13.0
+
+### 去掉按企业旁路
+
+- 删除 `scrape_company_jobs.py`、`companies.csv`、企业 CSV 导出、`score>70` 契约
+- 删除配套评测：`eval/`、`eval_position_route.py`
+- 只保留标准岗：`boss_cdp_raw.py` → Agent 归类 → `export_skillver_csv.py`
+
+## 2.12.0
+
+### 去掉 USCC
+
+- 标准岗 CSV 不再含「统一社会信用代码」，不再做工商检索 / cache / 人审回填
+- 人机闸门只剩登录与最终 CSV 核验
+
+## 2.11.0
+
+### 目录重整
+
+- 公共资产平铺在 `data/`：`city_codes.json`、`companies.csv`、`position_catalog.json`
+- 评测独立为仓库根 `eval/`
+- 爬取产物按搜索词建目录：`data/<搜索词>/jobs.json`（以及 details / seen / 归类文件）
+- 删除 `data/skillver/`、`data/yatn/` 及品牌页 querylist 死代码
+- 依赖只认 **uv**（`pyproject.toml` + `uv.lock`），去掉 `requirements.txt`
+
 ## 2.10.0
 
-### 新增
+### 企业列表改走搜索（停用品牌页）
 
-- **定岗映射评测集**：`data/eval/skillver_position_mapping_v1.json`（70 条）
-  - 测「用户叫法/自然语言 → 58 标准岗」映射准确率，与分流评测（`route_v1`）互补
-  - 58 岗全覆盖（`alias` 代表叫法）+ 5 `semantic`（规则零命中、语义兜底负责）+ 5 `reject`（应拒）+ 2 `ambiguous`（歧义走人工确认，自动评测跳过）
-  - 初始全 `draft`，须人工改为 `human` 后作为正式金标
-- **评测脚本**：`scripts/eval_position_mapping.py`（两个指标：岗名准确率 `position_accuracy`、误收率 `false_accept_rate`）
-- **规则层基线实测**：58 alias 样例全对（58/58）；应拒 5/5 全拒（误收 0）；语义样例规则层一律不自动定（正确行为，交语义兜底）→ 整体岗名准确率 **94.1%**（64/68）、误收率 **0%**
-- **规则匹配改进（最长别名优先）**：多候选时若某命中别名是另一命中别名的严格超串则淘汰较短者（如「具身智能研究」⊃「具身智能」）——修复嵌套歧义（`具身智能研究岗位` 现可自动定岗），SKILL.md Step 1 同步规则
-- **评测集扩充真实用户叫法**：70 → 109 条（alias 84 / semantic 12 / reject 9 / ambiguous 4），新增 26 条口语化叫法（智能体工作流、搜推广、RLHF 对齐、SLAM 建图等）与 7 条语义兜底、4 条应拒、2 条歧义
-  - 扩充后规则层基线：89.5%（94/105）、误收 0%；26 条真实叫法全对，11 条 mismatch 全为 semantic（规则零命中、交语义兜底，符合设计）
+- **`--scrape-brand-jobs` 停用**（`querylist.json` 易 5 页 `code=37`）。企业列表只走 `scrape_list` / `search/joblist.json`
+- 每家一次搜索：`brand_name` + 表中 `city`（可用 `--city 全国` 覆盖）+ **求职类型全职**（`jobType=1901`）
+- 列表后本地过滤：`encrypt_brand_id`（无 brand_id 则品牌名匹配）、日薪、实习；不拆经验档
+- 默认 8 页；多家之间间隔 45–90s；`code != 0` 立刻停
+- `boss_cdp_raw.py` 新增 `--job-type`；搜索 XHR 读取 API `code`
 
-### 文档
+## 2.9.1
 
-- `data/eval/README.md`：新增映射评测集章节（字段 / 指标 / 跑法 / 扩充方法）
-- 版本号四处同步 2.10.0
+### 品牌页页级断点
+
+- 每成功一页写入 `in_progress.last_ok_page`；中断后从 **下一页** 续爬，不再把未完成组合从第 1 页重打
+- 旧 v2 断点（只有 `completed`）仍可用；缺页码时按该组合已写入 JSON 的条数推算（15 条/页，例如 75 条 → 第 6 页）
+- 开始抓取时只要 `jobs_output` 存在就加载，避免无断点时覆盖已有列表
+- `code=37` 等接口异常仍立即停止，不重试
 
 ## 2.9.0
 
-### 新增
+### 环境自举（uv + 项目 .venv）
 
-- **断点续爬（task_state）**：每个标准岗一个 `data/skillver/task_state_<岗名>.json`
-  - drain / list-only / details-from-decisions 每次结束时**脚本自动写**状态（阶段、批次、下一批页码、本轮新增详情数、min-details、城市）
-  - 任何标准岗命令启动时**自动检测**上次状态并打印续爬提示（按是否达标给出建议）
-  - 与既有落盘机制闭环：列表每页写、详情每条写、seen 每条更新——中断不丢数据，续爬重跑同命令即按 seen 跳过已抓
-  - `print_resume_hint` 按 `new_details_count ≥ min_details` 区分建议（达标 → export；未达标 → 继续列表）
-
-### 文档
-
-- `SKILL.md`：断点续爬小节 + 默认路径表；`README.md`：特性 + 目录 + TODO 第 3 条标记完成；`.gitignore` 忽略 `task_state_*.json`
-- `README.md` 全面重写：按「简介 → 快速开始 → 两种路径 → 标准岗循环 → 断点续爬 → 定岗 → YATN → 导出 → 安装 → 约定 → 结构 → FAQ → 路线图」重组，消除章节重复与编号冲突
-- 版本号四处同步 2.9.0
-
-## 2.8.1
-
-### 修复
-
-- **「所在城市」与「岗位base地」同值**：详情页 location 多不带 `·` 分隔（如 `上海青浦区华为练秋湖研发中心`），`city_from_location` 原按 `·` 取第一段导致返回整串、两列退化相同
-  - `city_from_location` 改为：优先 `·` 分隔取首段；无 `·` 时用 `data/city_codes.json` 城市名做**最长前缀匹配**（如 `上海青浦区…` → `上海`）；仍无则回退 `--city`
-  - 修正补充：前缀匹配**优先于** `·` 分割（地址中段藏 `·` 时，如 `上海浦东新区…T5(模力·栈)T5`，`·` 分割会取错段；城市名总在地址开头，前缀匹配对两种格式都正确）
-  - `detail_to_row`：`岗位base地` 保留完整办公地址（location 原值），`所在城市` 为提取出的城市名——两列各司其职
-  - 测试同步：`test_valid_detail_columns` / `test_location_without_city_cli_fallback_exports` 断言更新
-- **定岗规则表补齐 58/58**：`position_aliases.json` 补 14 个机器人细分岗别名（伺服驱动/机械臂结构/触觉力觉/验证测试等），别名总数 44→58 岗、128→170 条，跨岗别名零重复
-
-### 文档
-
-- 版本号四处同步 2.8.1
+- `--check` 顺序：**有没有 uv → 没有则安装 → `uv sync` → CDP → 登录**
+- 依赖装进本 skill 的 `.venv`，不污染用户系统 Python
+- `uv sync` 失败时自动改走清华 / 阿里云镜像；也可设 `UV_INDEX_URL`
+- 抓取入口（`boss_cdp_raw.py` / `--scrape-brand-jobs` 等）在缺项目环境时会切到 `.venv` 再跑
 
 ## 2.8.0
 
-### 变更
+### 品牌页列表（替换 2.7.x 自动拆分）
 
-- **移除 USCC / 工商补全功能**（标准岗路径）
-  - `export_skillver_csv.py`：删除 `--uscc-cache` 参数与全部 USCC 逻辑（cache 加载/应用、`legal_name` 重写、USCC 校验、去重 key 的 uscc 优先分支）
-  - CSV 列精简：移除「企业名称」「统一社会信用代码」两列，保留「招聘品牌名」等 8 列
-  - 人机闸门由三处减为两处：`WAIT_LOGIN` / `WAIT_CSV_REVIEW`（删除 `WAIT_USCC_REVIEW`）
-  - 文档同步：`SKILL.md`（Step 6 USCC 整节删除、能力/原则/矩阵/提示词清理）、`README.md`、`start.md`、`AGENTS.md`、`references/classify-decisions.md`、`pyproject.toml` description
+- **只爬技术 + 产品**（`--position`，默认 `技术,产品`），再按 **工作经验**（`--experience`）筛选
+- 经验支持用户说法映射：`不限` / `实习` / `不要实习` / 下拉标签 / 代码（逗号分隔）
+- **去掉自动拆分探测**（不再按城市/薪资/学历递归拆桶凑全量）
+- 每组只翻网站能翻到的页（最多 14 页）；数量多少都接受
+- **列表阶段不过滤**日薪 / 猎头 / 匿名（无标题或岗位 ID 的坏卡片仍丢）
+- 节奏对齐 `boss_cdp_raw.scrape_list`：首屏导航后滚动，翻页间隔 12–22s；接口异常即停
+- 断点改为「类型×经验」组合级（v2）；每页写入 `jobs_output`
+- `companies.csv` 阶跃星辰补上 `brand_id`
 
-### 文档
+## 2.7.1
 
-- 版本号四处同步 2.8.0（`boss_cdp_raw.py` / `scrape_company_jobs.py` / `pyproject.toml` / `SKILL.md` / `README.md`）
+### 稳定性加固（品牌页全量模式）
+
+- **拟人化动作**：`human_scroll` / `human_mouse_jitter` 从 `scrape_list` 闭包提升为 `boss_cdp_raw` 模块级函数；品牌页模式在宿主页导航后与每次 API 请求前复用同一套动作，与搜索路径行为一致
+- **断点续爬**：`BrandCheckpoint`（`<jobs_output>.checkpoint.json`）
+  - 叶桶完成、拆分决策（含兜底 base_jobs）即时落盘；中断后重跑零请求跳过已完成桶
+  - 每完成一家企业即合并写一次 jobs_output（与搜索路径「每页写入」同思路）
+  - 全部完成才删除断点文件（下次全量刷新）；中断则保留供续爬
+- 触顶判定不再依赖 `hasMore`：收满 200 条即视为触顶拆分（cap 边界页 hasMore 语义不可靠）
 
 ## 2.7.0
 
 ### 新增
 
-- **定岗规则表**：`data/skillver/position_aliases.json`（用户叫法/关键词 → 58 标准岗原名）
-  - 定岗匹配改为**先规则后语义**：规则唯一命中直接定岗；歧义（多候选）列出候选请用户手动确认，确认后回写规则表；零命中才由 Agent 内置模型语义映射
-  - 规则层由 **Agent 编排执行**（Step 1 定岗阶段），脚本 `resolve_position` 严格原名校验保持不变，脚本零改动
-  - 回写规则表：`「该叫法 → 所选岗」` 追加去重，同输入下次直接命中
-
-### 文档
-
-- `SKILL.md`：version 2.7.0；执行原则 / Step 1 定岗流程 / 资源表 / 安装清单补充规则表
-- `README.md`：version 2.7.0；特性与核心约定补充定岗规则；TODO 第 2 条标记完成
-- 修正 `scripts/boss_cdp_raw.py` `__version__` 由 2.5.1 → 2.7.0（此前与其余三处不一致）
+- **品牌页全量列表**：`scrape_company_jobs.py --scrape-brand-jobs`
+  - 走 `/wapi/zpgeek/brand/job/querylist.json`，按 `brand_id` 列品牌在招全部岗位（解决关键词搜索 10 页上限 + 城市过滤 + 相关性导致的覆盖不全）
+  - 单筛选桶上限 200 条；超桶自动按 职位类型 → 城市 → 薪资 → 学历 → 经验 递归拆分（positionList/cityList 用 API 返回的桶计数预判）
+  - 学历/经验拆分会先翻满父桶 200 条兜底，避免漏「学历不限/经验不限」岗位
+  - `companies.csv` 新增可选 `brand_id` 列（BOSS 品牌页 URL 末段，`|` 分隔多品牌；MiniMax 已配）
+  - 请求节流（15–25s 随机）+ 限流退避（60/180/300s）+ 单次 150 请求预算；限流即停，不硬闯
+  - 沿用既有规则：丢日薪、过滤猎头/匿名、按 encrypt_job_id 去重，输出与 `--scrape-list` 同构，下游打分/详情/导出不变
 
 ## 2.6.0
 

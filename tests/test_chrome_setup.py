@@ -1,5 +1,4 @@
 import importlib.util
-import csv
 import io
 import json
 import os
@@ -9,20 +8,24 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from unittest import mock
 
 
-SCRIPT_PATH = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "boss_cdp_raw.py"
+SCRIPT_PATH = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "boss_common.py"
+ROOT_PATH = SCRIPT_PATH.parents[1]
+if str(ROOT_PATH) not in sys.path:
+    sys.path.insert(0, str(ROOT_PATH))
 
 
 def load_module():
     sys.modules.setdefault("websocket", mock.Mock())
     sys.modules.setdefault("requests", mock.Mock())
-    spec = importlib.util.spec_from_file_location("boss_cdp_raw", SCRIPT_PATH)
+    spec = importlib.util.spec_from_file_location("boss_common", SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    module.ensure_skill_env = lambda **kwargs: True
     return module
 
 
@@ -44,15 +47,15 @@ class ChromeSetupTests(unittest.TestCase):
         stream.reconfigure.assert_called_with(encoding="utf-8", errors="replace")
         self.assertEqual(stream.reconfigure.call_count, 2)
 
-    def test_default_result_dir_is_persistent_user_state(self):
+    def test_default_output_uses_search_term_folder(self):
         module = load_module()
-
-        self.assertNotIn("/tmp/", module.DEFAULT_RESULT_DIR)
-        self.assertTrue(module.DEFAULT_RESULT_DIR.endswith(".boss-zhipin-scraper/job-result"))
-        self.assertTrue(module.default_output_path("jobs").startswith(module.DEFAULT_RESULT_DIR))
-        self.assertTrue(module.default_output_path("details").startswith(module.DEFAULT_RESULT_DIR))
-        self.assertIn("boss_jobs_", module.default_output_path("jobs"))
-        self.assertIn("boss_details_", module.default_output_path("details"))
+        jobs = module.default_output_path("jobs", "阶跃星辰")
+        details = module.default_output_path("details", "阶跃星辰")
+        self.assertTrue(jobs.replace("\\", "/").endswith("data/阶跃星辰/jobs.json"))
+        self.assertTrue(details.replace("\\", "/").endswith("data/阶跃星辰/details.json"))
+        list_path, detail_path = module.default_skillver_output_paths("Agent工程师")
+        self.assertTrue(list_path.replace("\\", "/").endswith("data/Agent工程师/jobs.json"))
+        self.assertTrue(detail_path.replace("\\", "/").endswith("data/Agent工程师/details.json"))
 
     def test_create_page_session_defaults_to_background_with_visibility_override(self):
         module = load_module()
@@ -288,28 +291,31 @@ class ChromeSetupTests(unittest.TestCase):
 
     def test_main_rejects_unknown_city_before_login_probe(self):
         """CLI 城市预校验失败后以非零状态退出，不进入登录探测。"""
-        module = load_module()
+        from scripts import scrape_list as list_cli
 
-        with mock.patch.object(sys, "argv", [
-                "boss_cdp_raw.py",
-                "--position-name", "机器学习工程师",
-                "--city", "不存在市",
-        ]), \
-             mock.patch.object(module, "require_runtime_dependencies",
+        position = {
+            "position_name": "机器学习工程师",
+            "job_intent_id": "J01",
+            "job_intent_label": "AI 算法工程师",
+        }
+        with mock.patch.object(list_cli, "ensure_skill_env", return_value=True), \
+             mock.patch.object(list_cli, "require_runtime_dependencies",
                                return_value=True), \
-             mock.patch.object(module, "resolve_standard_position", return_value={
-                 "position_name": "机器学习工程师",
-                 "job_intent_id": "J01",
-                 "job_intent_label": "AI 算法工程师",
-             }), \
-             mock.patch.object(module, "load_skillver_seen",
+             mock.patch.object(list_cli, "load_position_catalog",
+                               return_value=[position]), \
+             mock.patch.object(list_cli, "load_skillver_seen",
                                return_value={"version": 1, "jobs": {}}), \
-             mock.patch.object(module, "resolve_city",
-                               side_effect=module.CityResolutionError("无法解析城市")), \
-             mock.patch.object(module, "check_login_state") as login_probe, \
+             mock.patch.object(
+                 list_cli, "resolve_city",
+                 side_effect=list_cli.CityResolutionError("无法解析城市"),
+             ), \
+             mock.patch.object(list_cli, "ensure_scrape_login") as login_probe, \
              redirect_stdout(io.StringIO()) as output:
             with self.assertRaises(SystemExit) as exit_context:
-                module.main()
+                list_cli.main([
+                    "--position-name", "机器学习工程师",
+                    "--city", "不存在市",
+                ])
 
         self.assertEqual(exit_context.exception.code, 1)
         self.assertIn("无法解析城市", output.getvalue())
@@ -491,8 +497,13 @@ class ChromeSetupTests(unittest.TestCase):
         )
         requests_mock = mock.Mock()
         requests_mock.get.return_value = response
+        env_mock = mock.Mock()
+        env_mock.which_uv.return_value = "uv"
+        env_mock.uv_sync.return_value = True
+        env_mock.running_in_skill_venv.return_value = True
         stdout = io.StringIO()
-        with mock.patch.object(module, "require_runtime_dependencies", return_value=True), \
+        with mock.patch.object(module, "_load_ensure_uv_env", return_value=env_mock), \
+                mock.patch.object(module, "require_runtime_dependencies", return_value=True), \
                 mock.patch.object(module, "requests", requests_mock), \
                 mock.patch.object(module, "check_login_state", return_value=restricted), \
                 redirect_stdout(stdout):
@@ -523,32 +534,16 @@ class ChromeSetupTests(unittest.TestCase):
 
         detail = module.build_detail_record(job, extracted)
 
-        self.assertEqual(detail["job_id"], "abc123")
-        self.assertEqual(detail["job_link"], job["job_link"])
-        self.assertEqual(detail["link"], job["job_link"])
-        self.assertEqual(detail["salary"], "30-60K")
-        self.assertEqual(detail["salary_source"], "api")
-        self.assertEqual(detail["boss_active_status"], "今日活跃")
         self.assertEqual(detail["encrypt_job_id"], "abc")
-
-    def test_detail_record_falls_back_to_list_active_status(self):
-        module = load_module()
-        job = {
-            "job_id": "abc123",
-            "title": "AI Engineer",
-            "boss_name": "Acme",
-            "salary": "30-60K",
-            "salary_source": "api",
-            "location": "上海",
-            "tags": "3-5年 | 本科",
-            "job_link": "https://www.zhipin.com/job_detail/abc.html",
-            "boss_active_status": "本周活跃",
-        }
-        extracted = {"tags": ["Python"], "jd": "Build AI agents"}
-
-        detail = module.build_detail_record(job, extracted)
-
-        self.assertEqual(detail["boss_active_status"], "本周活跃")
+        self.assertEqual(detail["title"], "AI Engineer")
+        self.assertEqual(detail["company"], "Acme")
+        self.assertEqual(detail["salary"], "30-60K")
+        self.assertEqual(detail["location"], "上海")
+        self.assertEqual(detail["jd"], "Build AI agents")
+        self.assertNotIn("job_link", detail)
+        self.assertNotIn("job_id", detail)
+        self.assertNotIn("salary_source", detail)
+        self.assertNotIn("boss_active_status", detail)
 
     def test_detail_extractor_never_uses_body_text_as_jd_fallback(self):
         module = load_module()
@@ -753,9 +748,10 @@ class ChromeSetupTests(unittest.TestCase):
         module = load_module()
         js = module.FETCH_API_JS_TEMPLATE
 
-        self.assertIn("j.activeTimeDesc", js)
-        self.assertIn("j.bossOnline", js)
-        self.assertIn("boss_active_status: j.activeTimeDesc || (j.bossOnline ?", js)
+        self.assertIn("security_id: j.securityId", js)
+        self.assertIn("lid: j.lid", js)
+        self.assertNotIn("boss_active_status", js)
+        self.assertNotIn("welfareList", js)
 
     def test_extract_job_description_removes_recruiter_card_before_safety_footer(self):
         module = load_module()
@@ -826,6 +822,31 @@ class ChromeSetupTests(unittest.TestCase):
         self.assertEqual(
             module.parse_api_jobs_eval_value(json.dumps([{"title": "Java", "job_link": "https://example.com"}])),
             [{"title": "Java", "job_link": "https://example.com"}],
+        )
+        envelope = {
+            "code": 0,
+            "message": "Success",
+            "jobs": [{"title": "Java", "job_link": "https://example.com"}],
+        }
+        self.assertEqual(
+            module.parse_api_jobs_eval_value(json.dumps(envelope)),
+            [{"title": "Java", "job_link": "https://example.com"}],
+        )
+
+    def test_resolve_job_type_and_search_api_block(self):
+        module = load_module()
+        self.assertEqual(module.resolve_job_type("全职"), "1901")
+        self.assertEqual(module.resolve_job_type("1902"), "1902")
+        self.assertIsNone(module.resolve_job_type("不限"))
+        with self.assertRaises(ValueError):
+            module.resolve_job_type("外包")
+        with self.assertRaises(SystemExit) as ctx:
+            module.raise_if_search_api_blocked(
+                {"code": 37, "message": "您的环境存在异常", "error": None, "jobs": []}
+            )
+        self.assertIn("code=37", str(ctx.exception))
+        module.raise_if_search_api_blocked(
+            {"code": 0, "message": "Success", "error": None, "jobs": []}
         )
 
     def test_login_probe_uses_one_budgeted_request(self):
@@ -1000,7 +1021,28 @@ class ChromeSetupTests(unittest.TestCase):
 
         self.assertEqual(details, [{"job_id": "abc123"}])
 
-    def test_windows_default_paths_use_localappdata(self):
+    def test_windows_prefers_edge_when_present(self):
+        module = load_module()
+        env = {
+            "LOCALAPPDATA": r"C:\Users\leon\AppData\Local",
+            "PROGRAMFILES": r"C:\Program Files",
+            "PROGRAMFILES(X86)": r"C:\Program Files (x86)",
+        }
+        expected_edge = r"C:\Users\leon\AppData\Local\Microsoft\Edge\Application\msedge.exe"
+        expected_profile = r"C:\Users\leon\AppData\Local\Microsoft\Edge\User Data"
+        present = {
+            expected_edge,
+            expected_profile,
+            r"C:\Users\leon\AppData\Local\Google\Chrome\Application\chrome.exe",
+            r"C:\Users\leon\AppData\Local\Google\Chrome\User Data",
+        }
+        with mock.patch.object(module.platform, "system", return_value="Windows"), \
+                mock.patch.dict(module.os.environ, env, clear=False), \
+                mock.patch.object(module.os.path, "exists", side_effect=lambda p: p in present):
+            self.assertEqual(module.get_default_chrome_path(), expected_edge)
+            self.assertEqual(module.get_default_profile_dir(), expected_profile)
+
+    def test_windows_falls_back_to_chrome_when_edge_missing(self):
         module = load_module()
         env = {
             "LOCALAPPDATA": r"C:\Users\leon\AppData\Local",
@@ -1008,14 +1050,38 @@ class ChromeSetupTests(unittest.TestCase):
             "PROGRAMFILES(X86)": r"C:\Program Files (x86)",
         }
         expected_chrome = r"C:\Users\leon\AppData\Local\Google\Chrome\Application\chrome.exe"
+        expected_profile = r"C:\Users\leon\AppData\Local\Google\Chrome\User Data"
+        present = {expected_chrome, expected_profile}
         with mock.patch.object(module.platform, "system", return_value="Windows"), \
                 mock.patch.dict(module.os.environ, env, clear=False), \
-                mock.patch.object(module.os.path, "exists", side_effect=lambda p: p == expected_chrome):
+                mock.patch.object(module.os.path, "exists", side_effect=lambda p: p in present):
             self.assertEqual(module.get_default_chrome_path(), expected_chrome)
+            self.assertEqual(module.get_default_profile_dir(), expected_profile)
+
+    def test_windows_defaults_to_edge_path_when_none_installed(self):
+        module = load_module()
+        env = {
+            "LOCALAPPDATA": r"C:\Users\leon\AppData\Local",
+            "PROGRAMFILES": r"C:\Program Files",
+            "PROGRAMFILES(X86)": r"C:\Program Files (x86)",
+        }
+        with mock.patch.object(module.platform, "system", return_value="Windows"), \
+                mock.patch.dict(module.os.environ, env, clear=False), \
+                mock.patch.object(module.os.path, "exists", return_value=False):
+            self.assertEqual(
+                module.get_default_chrome_path(),
+                r"C:\Users\leon\AppData\Local\Microsoft\Edge\Application\msedge.exe",
+            )
             self.assertEqual(
                 module.get_default_profile_dir(),
-                r"C:\Users\leon\AppData\Local\Google\Chrome\User Data",
+                r"C:\Users\leon\AppData\Local\Microsoft\Edge\User Data",
             )
+
+    def test_is_chrome_command_matches_edge_and_chrome(self):
+        module = load_module()
+        self.assertTrue(module.is_chrome_command(r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"))
+        self.assertTrue(module.is_chrome_command(r'"C:\Program Files\Google\Chrome\Application\chrome.exe"'))
+        self.assertFalse(module.is_chrome_command(r"C:\Windows\System32\notepad.exe"))
 
     def test_windows_process_parsing_matches_user_data_dir_and_cdp_port(self):
         module = load_module()
@@ -1035,6 +1101,27 @@ class ChromeSetupTests(unittest.TestCase):
             )
             self.assertEqual(
                 module.chrome_user_data_dirs_for_cdp_port(9333),
+                [r"C:\Users\leon\.boss-zhipin-scraper\chrome-profile"],
+            )
+
+    def test_windows_process_parsing_matches_msedge(self):
+        module = load_module()
+        ps_json = json.dumps([{
+            "ProcessId": 321,
+            "CommandLine": (
+                r'"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" '
+                r'--remote-debugging-port=9222 '
+                r'--user-data-dir="C:\Users\leon\.boss-zhipin-scraper\chrome-profile"'
+            ),
+        }])
+        with mock.patch.object(module.platform, "system", return_value="Windows"), \
+                mock.patch.object(module.subprocess, "run", return_value=type("Completed", (), {"stdout": ps_json, "returncode": 0})()):
+            self.assertEqual(
+                module.chrome_pids_for_user_data_dir(r"C:\Users\leon\.boss-zhipin-scraper\chrome-profile"),
+                [321],
+            )
+            self.assertEqual(
+                module.chrome_user_data_dirs_for_cdp_port(9222),
                 [r"C:\Users\leon\.boss-zhipin-scraper\chrome-profile"],
             )
 
@@ -1066,31 +1153,6 @@ class ChromeSetupTests(unittest.TestCase):
             "salary_source": "api_empty",
             "job_link": "https://www.zhipin.com/job_detail/abc.html",
         }]))
-
-    def test_write_detail_csv_exports_detail_fields(self):
-        module = load_module()
-        with tempfile_profile() as paths:
-            csv_path = paths["cdp_profile"] / "details.csv"
-            module.write_detail_csv(str(csv_path), [{
-                "job_id": "abc123",
-                "title": "AI Engineer",
-                "company": "Acme",
-                "salary": "30-60K",
-                "salary_source": "api",
-                "location": "上海",
-                "tags_list": "3-5年 | 本科",
-                "job_link": "https://www.zhipin.com/job_detail/abc.html",
-                "skill_tags": ["Python", "LLM"],
-                "jd": "Build AI agents",
-            }])
-
-            with open(csv_path, encoding="utf-8-sig", newline="") as f:
-                rows = list(csv.DictReader(f))
-
-        self.assertEqual(rows[0]["job_id"], "abc123")
-        self.assertEqual(rows[0]["salary_source"], "api")
-        self.assertEqual(rows[0]["skill_tags"], "Python | LLM")
-        self.assertEqual(rows[0]["jd"], "Build AI agents")
 
     def test_is_headhunter_job_detects_title_and_hr_agency(self):
         module = load_module()
@@ -1202,28 +1264,8 @@ class ChromeSetupTests(unittest.TestCase):
                     title_exclude=list(module.DEFAULT_PM_TITLE_EXCLUDE),
                 )
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["job_id"], "pm")
+        self.assertEqual(results[0]["encrypt_job_id"], "pm")
         self.assertIn("pm.html", navigated[0])
-
-    def test_resolve_title_filters_from_args_pm_preset(self):
-        module = load_module()
-        args = mock.Mock(
-            title_include=None,
-            title_exclude=None,
-            title_filter_pm=True,
-        )
-        include, exclude = module.resolve_title_filters_from_args(args)
-        self.assertEqual(include, list(module.DEFAULT_PM_TITLE_INCLUDE))
-        self.assertEqual(exclude, list(module.DEFAULT_PM_TITLE_EXCLUDE))
-
-        args = mock.Mock(
-            title_include="产品经理",
-            title_exclude="工程师",
-            title_filter_pm=True,
-        )
-        include, exclude = module.resolve_title_filters_from_args(args)
-        self.assertEqual(include, ["产品经理"])
-        self.assertEqual(exclude, ["工程师"])
 
     def test_scrape_details_filters_headhunters_before_max_details(self):
         module = load_module()
@@ -1283,7 +1325,7 @@ class ChromeSetupTests(unittest.TestCase):
                 )
 
         self.assertEqual(len(results), 1)
-        self.assertEqual(results[0]["job_id"], "direct")
+        self.assertEqual(results[0]["encrypt_job_id"], "direct")
         self.assertEqual(len(navigated), 1)
         self.assertIn("direct.html", navigated[0])
 
@@ -1399,110 +1441,6 @@ class ChromeSetupTests(unittest.TestCase):
         self.assertIn("fresh", seen)
         self.assertEqual(len(navigated), 1)
         self.assertIn("fresh.html", navigated[0])
-
-    def test_load_keywords_file_and_position_gap_helpers(self):
-        module = load_module()
-        with tempfile_profile() as paths:
-            paths["cdp_profile"].mkdir(parents=True, exist_ok=True)
-            path = paths["cdp_profile"] / "batch.json"
-            path.write_text(
-                json.dumps({"keywords": ["岗A", "岗B", "岗C"]}),
-                encoding="utf-8",
-            )
-            self.assertEqual(
-                module.load_keywords_file(str(path)),
-                ["岗A", "岗B", "岗C"],
-            )
-            too_many = paths["cdp_profile"] / "too_many.json"
-            too_many.write_text(
-                json.dumps([f"k{i}" for i in range(module.MAX_BATCH_KEYWORDS + 1)]),
-                encoding="utf-8",
-            )
-            with self.assertRaises(ValueError):
-                module.load_keywords_file(str(too_many))
-
-        self.assertEqual(module.parse_position_gap("480-900"), (480, 900))
-        self.assertEqual(module.parse_position_gap("600"), (600, 600))
-        self.assertEqual(module.parse_position_gap(None), module.DEFAULT_POSITION_GAP_SEC)
-        slept = []
-        delay = module.sleep_between_positions((0, 0), sleeper=slept.append)
-        self.assertEqual(delay, 0.0)
-        self.assertEqual(slept, [])
-        delay = module.sleep_between_positions((10, 10), sleeper=slept.append)
-        self.assertEqual(delay, 10.0)
-        self.assertEqual(slept, [10.0])
-
-    def test_run_keyword_batch_sleeps_between_positions_without_cdp(self):
-        module = load_module()
-        sleeps = []
-        scrape_calls = []
-
-        def fake_scrape_list(keyword, city, pages, filters, output_path, **kwargs):
-            scrape_calls.append(("list", keyword, output_path))
-            pathlib.Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-            pathlib.Path(output_path).write_text(
-                json.dumps({"keyword": keyword, "jobs": []}),
-                encoding="utf-8",
-            )
-            return {"keyword": keyword, "jobs": []}
-
-        def fake_scrape_details(list_data, max_details, output_path, **kwargs):
-            scrape_calls.append(("detail", list_data.get("keyword"), output_path))
-            return []
-
-        with tempfile_profile() as paths:
-            out_dir = paths["cdp_profile"] / "raw"
-            with mock.patch.object(module, "scrape_list", side_effect=fake_scrape_list), \
-                    mock.patch.object(module, "scrape_details", side_effect=fake_scrape_details):
-                module.run_keyword_batch(
-                    ["岗A", "岗B"],
-                    city="上海",
-                    pages=1,
-                    filters={"scale": "305"},
-                    output_dir=str(out_dir),
-                    max_details=5,
-                    position_gap=(0, 0),
-                    detail=True,
-                    sleeper=lambda seconds: sleeps.append(seconds),
-                )
-            self.assertEqual([c[0] for c in scrape_calls], ["list", "list"])
-            self.assertEqual(sleeps, [])
-            self.assertTrue((out_dir / "boss_jobs_01_岗A.json").exists())
-            self.assertTrue((out_dir / "boss_jobs_02_岗B.json").exists())
-
-        sleeps.clear()
-        scrape_calls.clear()
-
-        def scrape_list_with_jobs(keyword, city, pages, filters, output_path, **kwargs):
-            scrape_calls.append(("list", keyword))
-            return {
-                "keyword": keyword,
-                "jobs": [{
-                    "encrypt_job_id": f"{keyword}-id",
-                    "boss_title": "HR",
-                    "job_link": f"https://www.zhipin.com/job_detail/{keyword}.html",
-                }],
-            }
-
-        with tempfile_profile() as paths:
-            out_dir = paths["cdp_profile"] / "raw2"
-            with mock.patch.object(module, "scrape_list", side_effect=scrape_list_with_jobs), \
-                    mock.patch.object(module, "scrape_details", side_effect=fake_scrape_details):
-                module.run_keyword_batch(
-                    ["岗A", "岗B", "岗C"],
-                    city="上海",
-                    pages=1,
-                    filters={},
-                    output_dir=str(out_dir),
-                    max_details=5,
-                    position_gap=(3, 3),
-                    sleeper=lambda seconds: sleeps.append(seconds),
-                )
-            self.assertEqual(
-                [c[0] for c in scrape_calls],
-                ["list", "detail", "list", "detail", "list", "detail"],
-            )
-            self.assertEqual(sleeps, [3.0, 3.0])
 
     def test_scrape_details_final_save_handles_bare_filename(self):
         """--detail-output 传不带目录的裸文件名时，最终保存不应崩溃。
@@ -1782,27 +1720,38 @@ class ChromeSetupTests(unittest.TestCase):
             self.assertEqual(rc, 0)
 
     def test_help_does_not_require_cdp_runtime_dependencies(self):
+        chrome = SCRIPT_PATH.parent / "chrome_cdp.py"
         result = subprocess.run(
-            [sys.executable, str(SCRIPT_PATH), "--help"],
+            [sys.executable, str(chrome), "--help"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=10,
         )
-
         self.assertEqual(result.returncode, 0)
         self.assertIn("--setup-chrome", result.stdout)
         self.assertIn("--reset-chrome-profile", result.stdout)
         self.assertIn("--no-wait-login", result.stdout)
         self.assertIn("--login-timeout", result.stdout)
         self.assertIn("--stop-chrome", result.stdout)
-        self.assertIn("--close-chrome", result.stdout)
-        self.assertIn("--position-name", result.stdout)
+
+        listed = subprocess.run(
+            [sys.executable, str(SCRIPT_PATH.parent / "scrape_list.py"), "--help"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+        self.assertEqual(listed.returncode, 0)
+        self.assertIn("--query", listed.stdout)
+        self.assertIn("--position-name", listed.stdout)
+        self.assertIn("--close-chrome", listed.stdout)
 
     def test_resolve_standard_position_unknown_exits(self):
         module = load_module()
-        catalog_path = SCRIPT_PATH.parents[1] / "data" / "skillver" / "position_catalog.json"
+        catalog_path = SCRIPT_PATH.parents[1] / "data" / "position_catalog.json"
         with self.assertRaises(SystemExit) as ctx:
             module.resolve_standard_position(
                 "完全不存在的标准岗",
@@ -1810,31 +1759,16 @@ class ChromeSetupTests(unittest.TestCase):
             )
         self.assertIn("unknown", str(ctx.exception))
 
-    def test_main_requires_position_name_for_scrape(self):
-        module = load_module()
-        with mock.patch.object(sys, "argv", ["boss_cdp_raw.py", "--city", "上海"]), \
-                mock.patch.object(module, "require_runtime_dependencies",
-                                  return_value=True), \
-                redirect_stdout(io.StringIO()) as output:
-            with self.assertRaises(SystemExit) as exit_context:
-                module.main()
-        self.assertEqual(exit_context.exception.code, 1)
-        self.assertIn("--position-name", output.getvalue())
+    def test_main_requires_query_for_scrape(self):
+        from scripts import scrape_list as list_cli
 
-    def test_main_rejects_keywords_file_as_legacy(self):
-        module = load_module()
-        with mock.patch.object(sys, "argv", [
-                "boss_cdp_raw.py",
-                "--keywords-file", "data/_legacy/batches/batch01.json",
-                "--position-name", "机器学习工程师",
-        ]), \
-                mock.patch.object(module, "require_runtime_dependencies",
-                                  return_value=True), \
-                redirect_stdout(io.StringIO()) as output:
+        with redirect_stdout(io.StringIO()) as output, \
+                redirect_stderr(io.StringIO()) as err:
             with self.assertRaises(SystemExit) as exit_context:
-                module.main()
-        self.assertEqual(exit_context.exception.code, 1)
-        self.assertIn("legacy", output.getvalue().lower())
+                list_cli.main(["--city", "上海"])
+        self.assertEqual(exit_context.exception.code, 2)
+        combined = output.getvalue() + err.getvalue()
+        self.assertTrue("--query" in combined or "搜索词" in combined)
 
     def test_scrape_details_skips_seen_has_details_and_writes_exported_false(self):
         module = load_module()
@@ -2010,7 +1944,9 @@ class SkillverMatchFilterTests(unittest.TestCase):
 
         self.assertEqual(calls["n"], 1)
 
-    def test_main_list_only_mode_caps_pages(self):
+    def test_main_list_does_not_cap_pages(self):
+        from scripts import scrape_list as list_cli
+
         module = load_module()
         captured = {}
 
@@ -2018,6 +1954,7 @@ class SkillverMatchFilterTests(unittest.TestCase):
             captured.update(kwargs)
             return {
                 "list_data": {"keyword": "x", "city": "上海", "total": 0, "jobs": []},
+                "list_batch_path": "x.json",
                 "classify_input_path": "x.json",
                 "classify_input": {},
                 "candidates": [],
@@ -2029,47 +1966,37 @@ class SkillverMatchFilterTests(unittest.TestCase):
             "job_intent_label": "AI 算法工程师",
         }
         with tempfile_profile() as paths:
-            with mock.patch.object(sys, "argv", [
-                    "boss_cdp_raw.py",
-                    "--position-name", "机器学习工程师",
-                    "--city", "上海",
-                    "--list-only",
-                    "--pages", "10",
-                    "--min-details", "80",
-                    "--catalog", str(
-                        SCRIPT_PATH.parents[1]
-                        / "data" / "skillver" / "position_catalog.json"
-                    ),
-                    "--seen", str(paths["cdp_profile"] / "seen.json"),
-                    "--output", str(paths["cdp_profile"] / "jobs.json"),
-                ]), \
-                    mock.patch.object(module, "require_runtime_dependencies",
+            with mock.patch.object(list_cli, "ensure_skill_env", return_value=True), \
+                    mock.patch.object(list_cli, "require_runtime_dependencies",
                                       return_value=True), \
-                    mock.patch.object(module, "resolve_city",
+                    mock.patch.object(list_cli, "resolve_city",
                                       return_value=("上海", "101020100")), \
-                    mock.patch.object(module, "ensure_scrape_login",
+                    mock.patch.object(list_cli, "ensure_scrape_login",
                                       return_value=True), \
-                    mock.patch.object(module, "resolve_standard_position",
-                                      return_value=position), \
-                    mock.patch.object(module, "load_position_catalog",
+                    mock.patch.object(list_cli, "load_position_catalog",
                                       return_value=[position]), \
-                    mock.patch.object(module, "load_skillver_seen",
-                                      return_value={"version": 2, "jobs": {},
-                                                    "by_position": {}}), \
-                    mock.patch.object(module, "skillver_seen_detail_ids",
-                                      return_value=set()), \
-                    mock.patch.object(module, "load_seen_encrypt_job_ids",
-                                      return_value=set()), \
+                    mock.patch.object(list_cli, "load_skillver_seen",
+                                      return_value={"version": 3, "jobs": {}}), \
                     mock.patch.object(
-                        module, "run_skillver_list_only_batch",
+                        list_cli, "run_skillver_list_only_batch",
                         side_effect=fake_list_only,
                     ), \
                     redirect_stdout(io.StringIO()) as output:
-                module.main()
+                list_cli.main([
+                    "--position-name", "机器学习工程师",
+                    "--city", "上海",
+                    "--pages", "10",
+                    "--catalog", str(
+                        SCRIPT_PATH.parents[1]
+                        / "data" / "position_catalog.json"
+                    ),
+                    "--seen", str(paths["cdp_profile"] / "seen.json"),
+                    "--output", str(paths["cdp_profile"] / "jobs.json"),
+                ])
 
-            self.assertEqual(captured["max_pages"], module.DEFAULT_SKILLVER_MAX_PAGES)
-            self.assertIn("标准岗模式页数上限", output.getvalue())
-            self.assertIn("超过上限", output.getvalue())
+            self.assertEqual(captured["max_pages"], 10)
+            self.assertEqual(captured["page_batch_size"], 1)
+            self.assertNotIn("列表页数上限", output.getvalue())
 
 
 class tempfile_profile:
@@ -2180,7 +2107,8 @@ class ProjectScopeTests(unittest.TestCase):
 
         combined = "\n".join(
             self._read_text(name)
-            for name in ("README.md", "CHANGELOG.md", "SKILL.md", "pyproject.toml", "requirements.txt", "uv.lock")
+            for name in ("README.md", "CHANGELOG.md", "SKILL.md", "pyproject.toml", "uv.lock")
+            if (ROOT_PATH / name).is_file()
         )
         for forbidden in (
             "resume_score",
@@ -2201,6 +2129,9 @@ class ProjectScopeTests(unittest.TestCase):
             "job_analyze.py",
             "enrich_company_uscc.py",
             "evaluate_skillver_p6.py",
+            "scrape_company_jobs.py",
+            "eval_position_route.py",
+            "boss_cdp_raw.py",
         ):
             self.assertFalse(
                 (ROOT_PATH / "scripts" / name).exists(),
@@ -2211,19 +2142,39 @@ class ProjectScopeTests(unittest.TestCase):
             "test_job_analyze.py",
             "test_enrich_company_uscc.py",
             "test_evaluate_skillver_p6.py",
+            "test_company_jobs.py",
+            "test_eval_position_route.py",
         ):
             self.assertFalse(
                 (ROOT_PATH / "tests" / name).exists(),
                 f"非核心测试不应保留: tests/{name}",
             )
+        self.assertFalse(
+            (ROOT_PATH / "references" / "company-job-match.md").exists(),
+            "企业岗 score 契约不应保留",
+        )
+        self.assertFalse(
+            (ROOT_PATH / "data" / "companies.csv").exists(),
+            "企业名单不应作为项目功能保留",
+        )
         pyproject = self._read_text("pyproject.toml")
         for entry in (
             "boss-summary",
             "boss-analyze",
             "boss-enrich-uscc",
             "boss-evaluate-skillver",
+            "boss-company-jobs",
+            "boss-scraper",
         ):
             self.assertNotIn(entry, pyproject)
+        self.assertFalse(
+            (ROOT_PATH / "_split_boss.py").exists(),
+            "拆分临时脚本不应保留",
+        )
+        self.assertFalse(
+            (ROOT_PATH / "_truncate_common.py").exists(),
+            "拆分临时脚本不应保留",
+        )
 
 
 if __name__ == "__main__":

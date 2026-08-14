@@ -1,35 +1,20 @@
 #!/usr/bin/env python3
-"""
-BOSS直聘职位抓取 + 分析 — 纯 CDP raw protocol
+"""Shared BOSS CDP runtime: Chrome, login, city, list/detail helpers.
 
-功能:
-  1. 搜索特定职位 (关键词 + 城市)
-  2. 筛选公司规模、融资阶段、薪资范围、经验、学历、行业
-  3. 抓取详情页 JD 并分析薪资范围和技能要求
-  4. 输出结构化 JSON + CSV + 终端分析报告
-  5. 环境检查、Chrome CDP 自动启动、登录状态检测
-
-用法:
-  uv run python3 scripts/boss_cdp_raw.py --keyword "Java 风控" --city 101020100 --pages 5
-  uv run python3 scripts/boss_cdp_raw.py --keyword "Java 风控" --scale 305 --salary 406
-  uv run python3 scripts/boss_cdp_raw.py --keyword "Java 风控" --analysis
-  uv run python3 scripts/boss_cdp_raw.py --keyword "Java 风控" --detail
-  uv run python3 scripts/boss_cdp_raw.py --check
-  uv run python3 scripts/boss_cdp_raw.py --setup-chrome
-  uv run python3 scripts/boss_cdp_raw.py --version
+CLIs: chrome_cdp.py, scrape_list.py, scrape_details.py.
+Cleaning: clean_classify_input.py, clean_details.py.
+Export: export_skillver_csv.py.
 """
 
-__version__ = "2.10.0"
+__version__ = "2.18.0"
 
 import json
 import time
 import random
 import sys
-import argparse
 import os
 import re
 import hashlib
-import csv
 import glob
 import platform
 import subprocess
@@ -37,16 +22,20 @@ import shutil
 import signal
 import logging
 import ntpath
+import importlib.util
 from dataclasses import dataclass
 from datetime import datetime
-from collections import Counter
-from difflib import SequenceMatcher
 from enum import Enum
 from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 from urllib.request import Request, urlopen
 
 websocket = None
 requests = None
+
+try:
+    from scripts import job_schema
+except ImportError:
+    import job_schema  # noqa: F401
 
 
 def configure_stdio_utf8():
@@ -92,86 +81,78 @@ _ENCRYPT_JOB_ID_IN_LINK_RE = re.compile(r"/job_detail/([^./]+)\.html", re.IGNORE
 DEFAULT_SKILLVER_MIN_DETAILS = 5
 DEFAULT_SKILLVER_MAX_MIN_DETAILS = 50
 DEFAULT_SKILLVER_MAX_DETAILS = 5  # deprecated alias of min-details
-DEFAULT_SKILLVER_PAGE_BATCH_SIZE = 2
-DEFAULT_SKILLVER_MAX_PAGES = 8
+DEFAULT_SKILLVER_PAGE_BATCH_SIZE = 1
+DEFAULT_SKILLVER_MAX_PAGES = 8  # unused as a flip cap; kept for older callers
 MULTI_SELECT_FILTER_KEYS = ("experience", "scale")
 _ANON_COMPANY_RE = re.compile(r"^(某.+|匿名.*|保密.*)$")
-DEFAULT_SKILLVER_EVAL_DIR = os.path.join("data", "skillver", "eval")
-DEFAULT_SKILLVER_EXPORTS_DIR = os.path.join("data", "skillver", "exports")
+_ILLEGAL_DIRNAME_RE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 def get_default_chrome_path():
-    """返回可用的 Chromium 内核浏览器可执行文件路径（Chrome 优先，Edge 兜底）。"""
     system = platform.system()
     if system == "Darwin":
-        candidates = [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        ]
-    elif system == "Windows":
+        return "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if system == "Windows":
         candidates = []
         local_app_data = os.environ.get("LOCALAPPDATA")
-        if local_app_data:
-            candidates.append(ntpath.join(local_app_data, "Google", "Chrome", "Application", "chrome.exe"))
-            candidates.append(ntpath.join(local_app_data, "Microsoft", "Edge", "Application", "msedge.exe"))
+        program_roots = []
         for env_name in ("PROGRAMFILES", "PROGRAMFILES(X86)"):
             base = os.environ.get(env_name)
             if base:
-                candidates.append(ntpath.join(base, "Google", "Chrome", "Application", "chrome.exe"))
-                candidates.append(ntpath.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
-    else:
-        candidates = [
-            "/usr/bin/google-chrome",
-            "/usr/bin/chromium-browser",
-            "/usr/bin/chromium",
-            "/snap/bin/chromium",
-            "/usr/bin/microsoft-edge",
-            "/usr/bin/microsoft-edge-stable",
-        ]
+                program_roots.append(base)
+        if local_app_data:
+            candidates.append(ntpath.join(local_app_data, "Microsoft", "Edge", "Application", "msedge.exe"))
+        for base in program_roots:
+            candidates.append(ntpath.join(base, "Microsoft", "Edge", "Application", "msedge.exe"))
+        if local_app_data:
+            candidates.append(ntpath.join(local_app_data, "Google", "Chrome", "Application", "chrome.exe"))
+        for base in program_roots:
+            candidates.append(ntpath.join(base, "Google", "Chrome", "Application", "chrome.exe"))
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+        return candidates[0] if candidates else "msedge.exe"
+
+    candidates = [
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/snap/bin/chromium",
+    ]
     for candidate in candidates:
         if os.path.exists(candidate):
             return candidate
-    return candidates[0] if candidates else "chrome.exe"
+    return candidates[0]
 
 
 def get_default_profile_dir():
-    """返回主浏览器用户数据目录（与 get_default_chrome_path 同序探测，供 --copy-login-state 使用）。"""
     system = platform.system()
     if system == "Darwin":
-        candidates = [
-            os.path.expanduser("~/Library/Application Support/Google/Chrome"),
-            os.path.expanduser("~/Library/Application Support/Microsoft Edge"),
-        ]
-    elif system == "Windows":
+        return os.path.expanduser("~/Library/Application Support/Google/Chrome")
+    if system == "Windows":
         base = os.environ.get("LOCALAPPDATA")
         if not base:
             base = ntpath.join(os.path.expanduser("~"), "AppData", "Local")
-        candidates = [
-            ntpath.join(base, "Google", "Chrome", "User Data"),
-            ntpath.join(base, "Microsoft", "Edge", "User Data"),
-        ]
-    else:
-        candidates = [
-            os.path.expanduser("~/.config/google-chrome"),
-            os.path.expanduser("~/.config/microsoft-edge"),
-        ]
-    for candidate in candidates:
-        if os.path.isdir(candidate):
-            return candidate
-    return candidates[0]
+        edge = ntpath.join(base, "Microsoft", "Edge", "User Data")
+        chrome = ntpath.join(base, "Google", "Chrome", "User Data")
+        if os.path.exists(edge):
+            return edge
+        if os.path.exists(chrome):
+            return chrome
+        return edge
+    return os.path.expanduser("~/.config/google-chrome")
 
 
 DEFAULT_CHROME_PATH = get_default_chrome_path()
 DEFAULT_PROFILE_DIR = get_default_profile_dir()
 
 DEFAULT_CDP_DATA_DIR = os.path.expanduser("~/.boss-zhipin-scraper/chrome-profile")
-DEFAULT_RESULT_DIR = os.path.expanduser("~/.boss-zhipin-scraper/job-result")
+DEFAULT_DATA_DIR = "data"
 DEFAULT_CITY_INPUT = "上海"
 
 # Skillver 标准岗主路径（P4）；legacy raw/batches / keywords-file 已退出主路径
-DEFAULT_SKILLVER_CATALOG = os.path.join("data", "skillver", "position_catalog.json")
-DEFAULT_SKILLVER_SEEN = os.path.join("data", "skillver", "seen_jobs.json")
-DEFAULT_SKILLVER_JOBS_DIR = os.path.join("data", "skillver", "jobs")
-DEFAULT_SKILLVER_DETAILS_DIR = os.path.join("data", "skillver", "details")
+DEFAULT_SKILLVER_CATALOG = os.path.join("data", "position_catalog.json")
+DEFAULT_SKILLVER_SEEN = os.path.join("data", "seen_jobs.json")
+DEFAULT_SKILLVER_UNEXPORTED = os.path.join("data", "unexported_details.json")
 LOGIN_PROBE_QUERY = "Java"
 LOGIN_PROBE_CITY = "101020100"
 LOGIN_PROBE_TARGETS = (
@@ -207,9 +188,20 @@ logging.basicConfig(
 log = logging.getLogger("boss_cdp")
 
 
-def default_output_path(kind):
-    filename = f"boss_{kind}_{datetime.now().strftime('%Y%m%d_%H%M')}.json"
-    return os.path.join(DEFAULT_RESULT_DIR, filename)
+def search_term_dirname(term):
+    cleaned = _ILLEGAL_DIRNAME_RE.sub("_", str(term or "").strip())
+    cleaned = cleaned.strip(" .")
+    return cleaned or "search"
+
+
+def search_term_dir(term):
+    return os.path.join(DEFAULT_DATA_DIR, search_term_dirname(term))
+
+
+def default_output_path(kind, keyword=None):
+    """Default scrape JSON: data/<搜索词>/jobs.json or details.json."""
+    name = "jobs.json" if kind == "jobs" else "details.json" if kind == "details" else f"{kind}.json"
+    return os.path.join(search_term_dir(keyword), name)
 
 
 def require_runtime_dependencies(*names):
@@ -230,11 +222,29 @@ def require_runtime_dependencies(*names):
             missing.append("websocket-client")
     if missing:
         print(f"缺少依赖: {' '.join(missing)}")
-        print("请安装（任选其一）:")
-        print(f"  uv add {' '.join(missing)}")
-        print(f"  pip install {' '.join(missing)}")
+        print("请运行: python scripts/chrome_cdp.py --check")
+        print("（会安装 uv 并 uv sync 到本 skill 的 .venv，勿 pip 进系统 Python）")
         return False
     return True
+
+
+def _load_ensure_uv_env():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ensure_uv_env.py")
+    spec = importlib.util.spec_from_file_location("ensure_uv_env", path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def ensure_skill_env(*, reexec_if_needed: bool = True) -> bool:
+    """Delegate to stdlib-only bootstrap so --check works before deps exist."""
+    mod = _load_ensure_uv_env()
+    if mod is None:
+        print("❌ 找不到 scripts/ensure_uv_env.py")
+        return False
+    return bool(mod.ensure_skill_env(reexec_if_needed=reexec_if_needed))
 
 
 # ============================================================
@@ -324,6 +334,13 @@ INDUSTRY_MAP = {
     "互联网": "1001", "电子商务": "1002", "金融": "1003", "游戏": "1004",
     "企业服务": "1005", "教育培训": "1006", "社交网络": "1007",
     "医疗健康": "1008", "生活服务": "1009", "广告营销": "1010",
+}
+
+JOB_TYPE_MAP = {
+    "不限": "0",
+    "全职": "1901",
+    "实习": "1902",
+    "兼职": "1903",
 }
 
 
@@ -424,6 +441,33 @@ BACKGROUND_VISIBILITY_SCRIPT = (
 )
 
 
+def human_scroll(cdp, sid):
+    """模拟人类滚动: 随机次数、随机距离、随机停顿，偶尔回滚一点"""
+    total_scrolls = random.randint(3, 6)
+    for i in range(total_scrolls):
+        # 大部分往下滚，偶尔往上回滚一点（模拟阅读回看）
+        if random.random() < 0.15:
+            delta = -random.randint(50, 150)
+        else:
+            delta = random.randint(150, 500)
+        cdp.eval_js(f"window.scrollBy(0,{delta})", sid)
+        # 滚动间隔随机：有时快速连续滚，有时停下来"看"
+        if random.random() < 0.3:
+            time.sleep(random.uniform(2.0, 4.0))
+        else:
+            time.sleep(random.uniform(0.5, 1.5))
+
+
+def human_mouse_jitter(cdp, sid):
+    """偶尔移动鼠标位置，模拟人在页面上活动"""
+    if random.random() < 0.4:
+        x = random.randint(100, 800)
+        y = random.randint(100, 600)
+        cdp.send("Input.dispatchMouseEvent", {
+            "type": "mouseMoved", "x": x, "y": y
+        }, sid)
+
+
 def create_page_session(cdp, background=True):
     """Create and attach an about:blank target without stealing focus by default.
 
@@ -459,35 +503,28 @@ FETCH_API_JS_TEMPLATE = """
     var xhr = new XMLHttpRequest();
     xhr.open('GET', '__API_URL__', false);
     xhr.send();
-    if (xhr.status !== 200) return JSON.stringify([{error: xhr.status}]);
+    if (xhr.status !== 200) return JSON.stringify({error: xhr.status, jobs: []});
     var data = JSON.parse(xhr.responseText);
     var jobs = (data.zpData || {}).jobList || [];
     var results = jobs.map(function(j) {
         return {
             title: j.jobName || '',
             salary: j.salaryDesc || '',
-            salary_source: j.salaryDesc ? 'api' : 'api_empty',
             location: (j.cityName || '') + '\\u00b7' + (j.areaDistrict || '') + '\\u00b7' + (j.businessDistrict || ''),
             tags: [j.jobExperience || '', j.jobDegree || ''].filter(function(t){return t && t !== '\\u4e0d\\u9650';}).join(' | '),
             boss_name: j.brandName || '',
             boss_title: j.bossTitle || '',
-            boss_active_status: j.activeTimeDesc || (j.bossOnline ? '\\u5728\\u7ebf' : ''),
-            company_scale: j.brandScaleName || '',
-            company_stage: j.brandStageName || '',
-            company_industry: j.brandIndustry || '',
-            job_labels: (j.jobLabels || []).join(' | '),
-            skills: (j.skills || []).join(' | '),
             security_id: j.securityId || '',
             lid: j.lid || '',
             encrypt_job_id: j.encryptJobId || '',
-            encrypt_boss_id: j.encryptBossId || '',
-            encrypt_brand_id: j.encryptBrandId || '',
-            job_link: j.encryptJobId ? 'https://www.zhipin.com/job_detail/' + j.encryptJobId + '.html' : '',
-            company_link: j.encryptBrandId ? 'https://www.zhipin.com/gongsi/' + j.encryptBrandId + '.html' : '',
-            welfare: (j.welfareList || []).join(' | ')
+            job_link: j.encryptJobId ? 'https://www.zhipin.com/job_detail/' + j.encryptJobId + '.html' : ''
         };
     });
-    return JSON.stringify(results);
+    return JSON.stringify({
+        code: data.code,
+        message: data.message || '',
+        jobs: results
+    });
 })()
 """
 
@@ -1203,54 +1240,10 @@ def wait_for_login(cdp_port=DEFAULT_CDP_PORT, timeout=DEFAULT_LOGIN_TIMEOUT, int
 
 
 # ============================================================
-# CSV 导出
-# ============================================================
-CSV_COLUMNS = [
-    "job_id", "title", "salary", "salary_source", "location", "tags", "boss_name",
-    "boss_active_status",
-    "company_scale", "company_stage", "company_industry", "skills",
-    "job_link", "welfare",
-]
-
-DETAIL_CSV_COLUMNS = [
-    "job_id", "encrypt_job_id", "title", "company", "salary", "salary_source",
-    "location", "boss_active_status", "tags_list", "job_link", "skill_tags", "jd",
-    "position_name", "job_intent_id", "job_intent_label",
-]
-
-
-def write_csv(csv_path, jobs):
-    """将 jobs 列表写入 CSV 文件"""
-    os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
-    with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
-        writer.writeheader()
-        for j in jobs:
-            # 确保每列都有值
-            row = {col: j.get(col, "") for col in CSV_COLUMNS}
-            writer.writerow(row)
-    print(f"CSV 已保存: {csv_path}")
-
-
-def write_detail_csv(csv_path, details):
-    """将岗位详情列表写入 CSV 文件"""
-    os.makedirs(os.path.dirname(csv_path) or ".", exist_ok=True)
-    with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=DETAIL_CSV_COLUMNS, extrasaction="ignore")
-        writer.writeheader()
-        for d in details:
-            row = {col: d.get(col, "") for col in DETAIL_CSV_COLUMNS}
-            if isinstance(row.get("skill_tags"), list):
-                row["skill_tags"] = " | ".join(row["skill_tags"])
-            writer.writerow(row)
-    print(f"详情 CSV 已保存: {csv_path}")
-
-
-# ============================================================
 # 增量写入 JSON
 # ============================================================
 def append_json(path, new_jobs):
-    """追加 jobs 到 JSON 文件，每条按 job_id 去重"""
+    """追加 jobs 到 JSON 文件，按 encrypt_job_id / job_link 去重。"""
     existing = []
     seen_ids = set()
     data = {}
@@ -1259,15 +1252,17 @@ def append_json(path, new_jobs):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             existing = data.get("jobs", [])
-            seen_ids = {j.get("job_id", "") for j in existing}
+            seen_ids = {job_schema.job_dedupe_key(j) for j in existing}
         except (json.JSONDecodeError, OSError, ValueError):
             data = {}
     added = 0
     for j in new_jobs:
-        if j.get("job_id") not in seen_ids:
-            existing.append(j)
-            seen_ids.add(j.get("job_id", ""))
-            added += 1
+        key = job_schema.job_dedupe_key(j)
+        if not key or key in seen_ids:
+            continue
+        existing.append(j)
+        seen_ids.add(key)
+        added += 1
     data["jobs"] = existing
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1277,7 +1272,6 @@ def append_json(path, new_jobs):
 def flush_jobs(path, meta, jobs):
     """每次有新数据就全量刷写（jobs 去重后），保证异常退出也能保留"""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    # 合并已有文件
     existing_jobs = []
     seen_ids = set()
     if os.path.exists(path):
@@ -1285,13 +1279,15 @@ def flush_jobs(path, meta, jobs):
             with open(path, "r", encoding="utf-8") as f:
                 old = json.load(f)
             existing_jobs = old.get("jobs", [])
-            seen_ids = {j.get("job_id", "") for j in existing_jobs}
+            seen_ids = {job_schema.job_dedupe_key(j) for j in existing_jobs}
         except (json.JSONDecodeError, OSError, ValueError):
             pass
     for j in jobs:
-        if j.get("job_id") not in seen_ids:
-            existing_jobs.append(j)
-            seen_ids.add(j.get("job_id", ""))
+        key = job_schema.job_dedupe_key(j)
+        if not key or key in seen_ids:
+            continue
+        existing_jobs.append(j)
+        seen_ids.add(key)
     meta["total"] = len(existing_jobs)
     meta["jobs"] = existing_jobs
     with open(path, "w", encoding="utf-8") as f:
@@ -1320,14 +1316,16 @@ def merge_jobs(external_path, new_jobs):
 
     old_jobs = old_data.get("jobs", [])
     merged = list(old_jobs)
-    seen_ids = {j.get("job_id", "") for j in merged}
+    seen_ids = {job_schema.job_dedupe_key(j) for j in merged}
 
     added = 0
     for j in new_jobs:
-        if j.get("job_id") not in seen_ids:
-            merged.append(j)
-            seen_ids.add(j.get("job_id", ""))
-            added += 1
+        key = job_schema.job_dedupe_key(j)
+        if not key or key in seen_ids:
+            continue
+        merged.append(j)
+        seen_ids.add(key)
+        added += 1
 
     print(f"合并: 旧文件 {len(old_jobs)} 条 + 新抓取 {len(new_jobs)} 条 = {len(merged)} 条 (新增 {added})")
     return merged
@@ -1419,6 +1417,20 @@ def normalize_filter_codes(raw):
     return ordered
 
 
+def resolve_job_type(value):
+    """Map 求职类型 label/code to joblist.json jobType. 不限 → None (omit)."""
+    text = str(value or "").strip()
+    if not text or text.lower() in ("0", "不限", "unlimited", "any"):
+        return None
+    if text in JOB_TYPE_MAP:
+        code = JOB_TYPE_MAP[text]
+        return None if code == "0" else code
+    if text.isdigit():
+        return None if text == "0" else text
+    allowed = "/".join(JOB_TYPE_MAP.keys())
+    raise ValueError(f"未知求职类型: {text}。可用: {allowed} 或代码 1901/1902/1903")
+
+
 def encode_filter_param(value):
     """Encode filter value for BOSS query/API (comma-joined multi-select)."""
     if value is None:
@@ -1460,23 +1472,68 @@ def should_use_dom_fallback(jobs, allow_dom_fallback=False):
     return allow_dom_fallback and not jobs
 
 
-def parse_api_jobs_eval_value(value):
+def parse_api_list_response(value):
+    """Parse in-page joblist.json eval result (envelope or legacy job array)."""
+    empty = {"code": None, "message": "", "error": None, "jobs": []}
     if not value:
-        return []
+        return dict(empty)
     try:
         parsed = json.loads(value) if isinstance(value, str) else value
     except (json.JSONDecodeError, ValueError, TypeError):
-        return []
-    if not isinstance(parsed, list):
-        return []
-
+        return dict(empty)
+    if isinstance(parsed, list):
+        http_err = None
+        jobs = []
+        for item in parsed:
+            if not isinstance(item, dict):
+                continue
+            if item.get("error") and not (item.get("title") or item.get("job_link")):
+                http_err = item.get("error")
+                continue
+            if item.get("title") or item.get("job_link"):
+                jobs.append(item)
+        return {
+            "code": None if jobs or http_err is None else None,
+            "message": "",
+            "error": http_err,
+            "jobs": jobs,
+        }
+    if not isinstance(parsed, dict):
+        return dict(empty)
     jobs = []
-    for item in parsed:
-        if not isinstance(item, dict) or item.get("error"):
-            continue
-        if item.get("title") or item.get("job_link"):
-            jobs.append(item)
-    return jobs
+    raw_jobs = parsed.get("jobs")
+    if isinstance(raw_jobs, list):
+        for item in raw_jobs:
+            if not isinstance(item, dict) or item.get("error"):
+                continue
+            if item.get("title") or item.get("job_link"):
+                jobs.append(item)
+    return {
+        "code": parsed.get("code"),
+        "message": str(parsed.get("message") or ""),
+        "error": parsed.get("error"),
+        "jobs": jobs,
+    }
+
+
+def raise_if_search_api_blocked(payload):
+    """Stop immediately on HTTP failure or BOSS wind-control codes."""
+    data = payload or {}
+    if data.get("error"):
+        raise SystemExit(
+            f"搜索 API HTTP {data.get('error')}，已停止。请稍后再试，不要硬闯。"
+        )
+    code = data.get("code")
+    if code in (None, "", 0, "0"):
+        return
+    message = str(data.get("message") or "").strip()
+    raise SystemExit(
+        f"搜索 API 异常 code={code} {message}，已停止。请稍后再试，不要硬闯。"
+    )
+
+
+def parse_api_jobs_eval_value(value):
+    return parse_api_list_response(value).get("jobs") or []
 
 
 def build_detail_url(job):
@@ -1497,7 +1554,7 @@ def build_detail_url(job):
     return urlunparse(parsed._replace(query=urlencode(params)))
 
 
-def find_latest_detail_file(result_dir=DEFAULT_RESULT_DIR):
+def find_latest_detail_file(result_dir=DEFAULT_DATA_DIR):
     pattern = os.path.join(result_dir, "boss_details_*.json")
     files = [path for path in glob.glob(pattern) if os.path.isfile(path)]
     if not files:
@@ -1505,7 +1562,7 @@ def find_latest_detail_file(result_dir=DEFAULT_RESULT_DIR):
     return max(files, key=lambda path: (os.path.getmtime(path), path))
 
 
-def detail_candidate_paths(input_path=None, detail_output=None, result_dir=DEFAULT_RESULT_DIR):
+def detail_candidate_paths(input_path=None, detail_output=None, result_dir=DEFAULT_DATA_DIR):
     candidates = []
     if detail_output:
         candidates.append(detail_output)
@@ -1528,7 +1585,7 @@ def detail_candidate_paths(input_path=None, detail_output=None, result_dir=DEFAU
     return deduped
 
 
-def load_existing_details(input_path=None, detail_output=None, result_dir=DEFAULT_RESULT_DIR):
+def load_existing_details(input_path=None, detail_output=None, result_dir=DEFAULT_DATA_DIR):
     for path in detail_candidate_paths(input_path, detail_output, result_dir):
         if not path or not os.path.exists(path):
             continue
@@ -1554,7 +1611,7 @@ def scrape_list(keyword, city_input, max_pages, filters, output_path,
     all_jobs = []
     seen = set()
     if not output_path:
-        output_path = default_output_path("jobs")
+        output_path = default_output_path("jobs", keyword)
 
     filters = normalize_filters_dict(filters)
 
@@ -1590,6 +1647,10 @@ def scrape_list(keyword, city_input, max_pages, filters, output_path,
         for k, v in INDUSTRY_MAP.items():
             if v == filters["industry"]:
                 filter_desc.append(f"行业={k}")
+    if filters.get("jobType"):
+        filter_desc.append(
+            f"求职类型={_codes_label(filters['jobType'], JOB_TYPE_MAP)}"
+        )
 
     print(f"=== BOSS直聘抓取 ===")
     print(f"关键词: {keyword} | 城市: {city_name} | 页数: {max_pages}")
@@ -1598,31 +1659,6 @@ def scrape_list(keyword, city_input, max_pages, filters, output_path,
     print()
 
     tid, sid = create_page_session(cdp)
-
-    def human_scroll(cdp, sid):
-        """模拟人类滚动: 随机次数、随机距离、随机停顿，偶尔回滚一点"""
-        total_scrolls = random.randint(3, 6)
-        for i in range(total_scrolls):
-            # 大部分往下滚，偶尔往上回滚一点（模拟阅读回看）
-            if random.random() < 0.15:
-                delta = -random.randint(50, 150)
-            else:
-                delta = random.randint(150, 500)
-            cdp.eval_js(f"window.scrollBy(0,{delta})", sid)
-            # 滚动间隔随机：有时快速连续滚，有时停下来"看"
-            if random.random() < 0.3:
-                time.sleep(random.uniform(2.0, 4.0))
-            else:
-                time.sleep(random.uniform(0.5, 1.5))
-
-    def human_mouse_jitter(cdp, sid):
-        """偶尔移动鼠标位置，模拟人在页面上活动"""
-        if random.random() < 0.4:
-            x = random.randint(100, 800)
-            y = random.randint(100, 600)
-            cdp.send("Input.dispatchMouseEvent", {
-                "type": "mouseMoved", "x": x, "y": y
-            }, sid)
 
     start_page = max(1, int(start_page or 1))
     max_pages = max(start_page, int(max_pages or start_page))
@@ -1655,7 +1691,8 @@ def scrape_list(keyword, city_input, max_pages, filters, output_path,
             api_url = f"{API_JOB_LIST_PATH}?{urlencode(api_params)}"
             api_js = FETCH_API_JS_TEMPLATE.replace("__API_URL__", api_url)
             val = cdp.eval_js(api_js, sid)
-
+            payload = parse_api_list_response(val)
+            raise_if_search_api_blocked(payload)
             jobs = parse_api_jobs_eval_value(val)
 
             # DOM 提取的薪资可能是加密字体，默认禁用；只有显式允许时才降级。
@@ -1683,24 +1720,20 @@ def scrape_list(keyword, city_input, max_pages, filters, output_path,
             new = 0
             page_new_jobs = []
             for j in jobs:
-                key = j.get('job_link') or j['title']
-                j['job_id'] = hashlib.md5(key.encode()).hexdigest()[:16]
-                j['location'] = normalize_location(j.get('location', ''))
-                if not j['location'] and city_name:
-                    j['location'] = city_name
-                if key in seen:
+                item = job_schema.project_list_job(j)
+                if city_name and not item["location"]:
+                    item["location"] = city_name
+                key = job_schema.job_dedupe_key(item)
+                if not key or key in seen:
                     continue
                 seen.add(key)
-                all_jobs.append(j)
-                page_new_jobs.append(j)
+                all_jobs.append(item)
+                page_new_jobs.append(item)
                 new += 1
-                salary = j.get('salary','?')
-                scale = j.get('company_scale', '')
-                active = j.get('boss_active_status', '')
-                extra = f" | {scale}" if scale else ""
-                if active:
-                    extra += f" | {active}"
-                print(f"  ✓ {j['title']} | {salary} | {j.get('location','')} | {j.get('boss_name','')}{extra}")
+                print(
+                    f"  ✓ {item['title']} | {item.get('salary','?')} | "
+                    f"{item.get('location','')} | {item.get('boss_name','')}"
+                )
 
             print(f"  本页 {len(jobs)} 条, 新增 {new}, 累计 {len(all_jobs)}")
 
@@ -1750,11 +1783,6 @@ def scrape_list(keyword, city_input, max_pages, filters, output_path,
             "scraped_at": datetime.now().isoformat(),
         }, all_jobs)
         print(f"已保存: {output_path}")
-
-        # CSV 导出
-        if fmt == "csv":
-            csv_path = output_path.rsplit(".", 1)[0] + ".csv"
-            write_csv(csv_path, all_jobs)
     else:
         print("无数据")
 
@@ -1777,28 +1805,16 @@ def resolve_encrypt_job_id(job):
 
 
 def build_detail_record(job, extracted, position=None, city_fallback=""):
-    link = job.get("job_link", "")
-    boss_active_status = resolve_boss_active_status(
-        list_status=job.get("boss_active_status", ""),
-        detail_status=extracted.get("boss_active_status", ""),
-    )
     record = {
-        "job_id": job.get("job_id", ""),
         "encrypt_job_id": resolve_encrypt_job_id(job),
         "title": job.get("title", ""),
-        "company": job.get("boss_name", ""),
+        "company": job.get("boss_name") or job.get("company") or "",
         "salary": job.get("salary", ""),
-        "salary_source": job.get("salary_source", ""),
         "location": resolve_detail_location(
             list_location=job.get("location", ""),
             detail_location=extracted.get("location", ""),
             city_fallback=city_fallback,
         ),
-        "boss_active_status": boss_active_status,
-        "tags_list": job.get("tags", ""),
-        "job_link": link,
-        "link": link,
-        "skill_tags": extracted.get("tags", []),
         "jd": extracted.get("jd", ""),
     }
     if position:
@@ -1838,7 +1854,7 @@ def load_position_catalog(path=None):
 
 
 def resolve_standard_position(position_name, catalog=None, catalog_path=None):
-    """Resolve --position-name against catalog; SystemExit if unknown."""
+    """Resolve a catalog position name; SystemExit if unknown."""
     mod = _load_skillver_export_module()
     rows = catalog if catalog is not None else mod.load_catalog(
         catalog_path or DEFAULT_SKILLVER_CATALOG
@@ -1846,20 +1862,49 @@ def resolve_standard_position(position_name, catalog=None, catalog_path=None):
     return mod.resolve_position(rows, position_name)
 
 
+def resolve_search_query(query=None, position_name=None):
+    """Search box text. --query wins; --position-name is an alias."""
+    q = str(query or "").strip() or str(position_name or "").strip()
+    if not q:
+        raise ValueError("请指定 --query（搜索词；也可用 --position-name 作为别名）")
+    return q
+
+
+def catalog_bindings_by_name(catalog):
+    out = {}
+    for item in catalog or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("position_name") or "").strip()
+        job_intent_id = str(item.get("job_intent_id") or "").strip()
+        job_intent_label = str(item.get("job_intent_label") or "").strip()
+        if name and job_intent_id and job_intent_label:
+            out[name] = {
+                "position_name": name,
+                "job_intent_id": job_intent_id,
+                "job_intent_label": job_intent_label,
+            }
+    return out
+
+
 def load_skillver_seen(path=None, catalog=None, catalog_names=None):
     mod = _load_skillver_export_module()
     names = catalog_names
     if names is None and catalog is not None:
         names = set(catalog_position_names(catalog))
+    if not path:
+        return mod.empty_seen()
     return mod.load_seen(
-        path or DEFAULT_SKILLVER_SEEN,
+        path,
         catalog_names=names,
     )
 
 
 def save_skillver_seen(path, seen):
+    if not path:
+        raise ValueError("seen_jobs.json path is required")
     mod = _load_skillver_export_module()
-    mod.save_seen(path or DEFAULT_SKILLVER_SEEN, seen)
+    mod.save_seen(path, seen)
 
 
 def skillver_seen_detail_ids(seen):
@@ -1880,8 +1925,90 @@ def mark_skillver_seen_scraped(
     )
 
 
+def add_skillver_unexported(
+    *,
+    key,
+    query="",
+    details_path="",
+    position_name="",
+    path=None,
+):
+    """Add a scraped detail to the unexported index (CSV not written yet)."""
+    if not key:
+        return
+    mod = _load_skillver_export_module()
+    store_path = path or DEFAULT_SKILLVER_UNEXPORTED
+    try:
+        store = mod.load_unexported(store_path)
+        mod.add_unexported(
+            store,
+            key=key,
+            query=query,
+            details_path=details_path,
+            position_name=position_name,
+        )
+        mod.save_unexported(store_path, store)
+    except (OSError, TypeError, ValueError) as exc:
+        log.warning(f"写入 unexported 失败: {exc}")
+
+
+def _as_path_list(value):
+    if not value:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value if str(item or "").strip()]
+    return [str(value)]
+
+
+def infer_classify_input_path(decisions_path):
+    name = os.path.basename(str(decisions_path or ""))
+    if "classify_decisions_" in name:
+        return os.path.join(
+            os.path.dirname(str(decisions_path)),
+            name.replace("classify_decisions_", "classify_input_", 1),
+        )
+    return None
+
+
+def count_catalog_mapped(results, catalog_names):
+    """Count decision rows whose position_name is a catalog name."""
+    names = set(catalog_names or [])
+    total = 0
+    for item in results or []:
+        if not isinstance(item, dict):
+            continue
+        pos = item.get("position_name")
+        if pos is None:
+            continue
+        pos = str(pos).strip()
+        if pos and (not names or pos in names):
+            total += 1
+    return total
+
+
+def resolve_decision_batches(classify_input_path, decisions_path):
+    """Return [(classify_input_or_None, decisions_path), ...]."""
+    decision_paths = _as_path_list(decisions_path)
+    if not decision_paths:
+        raise ValueError("缺少 --details-from-decisions")
+    classify_paths = _as_path_list(classify_input_path)
+    if not classify_paths:
+        for dec in decision_paths:
+            inferred = infer_classify_input_path(dec)
+            if inferred and os.path.isfile(inferred):
+                classify_paths.append(inferred)
+    if classify_paths and len(classify_paths) != len(decision_paths):
+        raise ValueError(
+            f"classify-input ({len(classify_paths)}) 与 "
+            f"decisions ({len(decision_paths)}) 数量须一致"
+        )
+    if not classify_paths:
+        return [(None, dec) for dec in decision_paths]
+    return list(zip(classify_paths, decision_paths))
+
+
 def mark_skillver_seen_classified(
-    seen, *, key, job, position_name, classified_by, catalog_names=None
+    seen, *, key, job, position_name, classified_by, catalog_names=None, query=""
 ):
     mod = _load_skillver_export_module()
     mod.mark_classified(
@@ -1891,17 +2018,24 @@ def mark_skillver_seen_classified(
         position_name=position_name,
         classified_by=classified_by,
         catalog_names=catalog_names,
+        query=query,
     )
 
 
-def skillver_pending_details(seen, position_name):
+def mark_skillver_seen_listed(seen, *, key, job, query="", catalog_names=None):
     mod = _load_skillver_export_module()
-    return mod.pending_details_for(seen, position_name)
+    mod.mark_listed(
+        seen,
+        key=key,
+        job=job,
+        query=query,
+        catalog_names=catalog_names,
+    )
 
 
-def skillver_count_details(seen, position_name):
+def skillver_count_details_all(seen):
     mod = _load_skillver_export_module()
-    return mod.count_details_for_position(seen, position_name)
+    return mod.count_details_all(seen)
 
 
 def skillver_job_in_seen(seen, key):
@@ -1909,81 +2043,15 @@ def skillver_job_in_seen(seen, key):
     return mod.job_in_seen(seen, key)
 
 
+def skillver_is_classified(seen, key):
+    mod = _load_skillver_export_module()
+    return mod.is_classified(seen, key)
+
+
 def default_skillver_output_paths(position_name):
-    """Default list/detail JSON paths under data/skillver/."""
-    slug = keyword_output_slug(position_name, 1)
-    # Drop batch index prefix for single-position runs: 01_foo -> foo
-    if slug.startswith("01_"):
-        slug = slug[3:]
-    list_path = os.path.join(DEFAULT_SKILLVER_JOBS_DIR, f"boss_jobs_{slug}.json")
-    detail_path = os.path.join(
-        DEFAULT_SKILLVER_DETAILS_DIR, f"boss_details_{slug}.json"
-    )
-    return list_path, detail_path
-
-
-def default_task_state_path(position_name):
-    """Per-position resume state: data/skillver/task_state_<岗>.json."""
-    slug = keyword_output_slug(position_name, 1)
-    if slug.startswith("01_"):
-        slug = slug[3:]
-    return os.path.join(
-        os.path.dirname(DEFAULT_SKILLVER_JOBS_DIR), f"task_state_{slug}.json"
-    )
-
-
-def load_task_state(position_name):
-    """Return resume state dict for a position, or None if absent/invalid."""
-    path = default_task_state_path(position_name)
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
-        return None
-    return data
-
-
-def save_task_state(position_name, **fields):
-    """Merge fields into the position's resume state and persist it."""
-    state = load_task_state(position_name) or {
-        "schema_version": 1,
-        "position_name": position_name,
-        "new_details_count": 0,
-    }
-    state.update(fields)
-    state["updated_at"] = datetime.now().isoformat()
-    path = default_task_state_path(position_name)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-    print(f"ℹ️  任务状态已保存: {path}")
-
-
-def print_resume_hint(position_name, min_details):
-    """If a prior task state exists, tell the Agent where to resume."""
-    state = load_task_state(position_name)
-    if not state:
-        return
-    stage = str(state.get("stage") or "?")
-    batch = state.get("batch_index") or "?"
-    nxt = state.get("next_list_start_page")
-    nxt_txt = str(nxt) if nxt else "无更多列表页/未知"
-    new_count = int(state.get("new_details_count") or 0)
-    try:
-        target = int(min_details or 0)
-    except (TypeError, ValueError):
-        target = 0
-    reached = target > 0 and new_count >= target
-    print(
-        f"ℹ️  检测到上次任务状态（断点续爬）: 阶段={stage} "
-        f"批次={batch} 下一批从第 {nxt_txt} 页 "
-        f"已新增详情={new_count}/{min_details}"
-    )
-    if reached:
-        print("   续爬建议：已新增详情 ≥ min-details → 直接 export；如需更多再继续列表循环")
-    else:
-        print("   续爬建议：详情未达标且有下一页 → 下一批 --list-only 继续；无下一页 → export 现有")
+    """Default list/detail JSON: data/<搜索词>/jobs.json and details.json."""
+    folder = search_term_dir(position_name)
+    return os.path.join(folder, "jobs.json"), os.path.join(folder, "details.json")
 
 
 def iter_detail_json_paths(roots):
@@ -1996,10 +2064,15 @@ def iter_detail_json_paths(roots):
             yield path
             continue
         if os.path.isdir(path):
-            pattern = os.path.join(path, "boss_details_*.json")
-            for matched in sorted(glob.glob(pattern)):
-                if os.path.isfile(matched):
-                    yield matched
+            patterns = (
+                os.path.join(path, "boss_details_*.json"),
+                os.path.join(path, "details.json"),
+                os.path.join(path, "*", "details.json"),
+            )
+            for pattern in patterns:
+                for matched in sorted(glob.glob(pattern)):
+                    if os.path.isfile(matched):
+                        yield matched
 
 
 def load_seen_encrypt_job_ids(roots):
@@ -2035,69 +2108,6 @@ def filter_jobs_missing_details(jobs, seen_encrypt_ids):
             continue
         kept.append(job)
     return kept, skipped
-
-
-def parse_position_gap(raw):
-    """Parse position-gap CLI value into (lo, hi) seconds. Default 8–15 minutes."""
-    if raw is None or str(raw).strip() == "":
-        return DEFAULT_POSITION_GAP_SEC
-    text = str(raw).strip()
-    try:
-        if "-" in text:
-            left, right = text.split("-", 1)
-            lo, hi = int(left.strip()), int(right.strip())
-        else:
-            lo = hi = int(text)
-    except ValueError as exc:
-        raise ValueError(
-            f"无效的 --position-gap: {raw!r}（示例: 480-900 或 600）"
-        ) from exc
-    if lo < 0 or hi < 0 or lo > hi:
-        raise ValueError(
-            f"无效的 --position-gap: {raw!r}（需满足 0 <= 最小值 <= 最大值）"
-        )
-    return lo, hi
-
-
-def sleep_between_positions(gap_range, sleeper=time.sleep):
-    """Sleep a random duration in gap_range seconds; return the delay used."""
-    lo, hi = gap_range
-    if lo == 0 and hi == 0:
-        return 0.0
-    delay = float(lo) if lo == hi else random.uniform(lo, hi)
-    minutes = delay / 60.0
-    print(f"\n⏳ 岗间等待 {minutes:.1f} 分钟（{delay:.0f}s）后继续下一岗位...\n")
-    sleeper(delay)
-    return delay
-
-
-def load_keywords_file(path):
-    """Load 1..MAX_BATCH_KEYWORDS keywords from a JSON list or {\"keywords\": [...]}."""
-    path = os.path.abspath(os.path.expanduser(path))
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    if isinstance(data, list):
-        items = data
-    elif isinstance(data, dict):
-        items = data.get("keywords", [])
-    else:
-        raise ValueError(f"关键词文件格式无效: {path}")
-    keywords = []
-    for item in items:
-        if isinstance(item, str) and item.strip():
-            keywords.append(item.strip())
-        elif isinstance(item, dict):
-            name = str(item.get("keyword") or "").strip()
-            if name:
-                keywords.append(name)
-    if not keywords:
-        raise ValueError(f"关键词文件为空: {path}")
-    if len(keywords) > MAX_BATCH_KEYWORDS:
-        raise ValueError(
-            f"单批最多 {MAX_BATCH_KEYWORDS} 个岗位关键词，当前 {len(keywords)} 个；"
-            "请拆成多批，批间休息由人工控制"
-        )
-    return keywords
 
 
 def keyword_output_slug(keyword, index):
@@ -2189,22 +2199,9 @@ def is_obvious_non_entity_recruiter(job):
 
 
 def job_card_for_agent(job, city_fallback=""):
-    eid = resolve_encrypt_job_id(job)
-    location = normalize_location((job or {}).get("location") or "")
-    if not location:
-        location = normalize_location(city_fallback)
-    return {
-        "id": eid,
-        "title": str((job or {}).get("title") or ""),
-        "company": str((job or {}).get("boss_name") or (job or {}).get("company") or ""),
-        "boss_title": str((job or {}).get("boss_title") or ""),
-        "salary": str((job or {}).get("salary") or ""),
-        "location": location,
-        "tags": str((job or {}).get("tags") or (job or {}).get("skills") or ""),
-        "job_link": str((job or {}).get("job_link") or ""),
-        "encrypt_job_id": eid,
-        "job_id": str((job or {}).get("job_id") or ""),
-    }
+    """Slim card for Agent classify_input. city_fallback kept for call-site compat."""
+    del city_fallback
+    return job_schema.project_classify_job(job)
 
 
 def write_json_file(path, payload):
@@ -2219,27 +2216,29 @@ def load_json_file(path):
 
 
 def default_classify_input_path(position_name, batch_index=1):
-    slug = keyword_output_slug(position_name, 1)
-    if slug.startswith("01_"):
-        slug = slug[3:]
     return os.path.join(
-        DEFAULT_SKILLVER_EXPORTS_DIR,
-        f"classify_input_{slug}_{int(batch_index)}.json",
+        search_term_dir(position_name),
+        f"classify_input_{int(batch_index)}.json",
+    )
+
+
+def default_list_batch_path(position_name, batch_index=1):
+    return os.path.join(
+        search_term_dir(position_name),
+        f"list_batch_{int(batch_index)}.json",
     )
 
 
 def default_classify_decisions_path(position_name, batch_index=1):
-    slug = keyword_output_slug(position_name, 1)
-    if slug.startswith("01_"):
-        slug = slug[3:]
     return os.path.join(
-        DEFAULT_SKILLVER_EXPORTS_DIR,
-        f"classify_decisions_{slug}_{int(batch_index)}.json",
+        search_term_dir(position_name),
+        f"classify_decisions_{int(batch_index)}.json",
     )
 
 
-def load_agent_decisions(path, *, target_position_name, catalog_names, expected_ids):
+def load_agent_decisions(path, *, catalog_names, expected_ids, target_position_name=None):
     """Validate Agent decision JSON. Returns (mapping id->name|None, errors)."""
+    del target_position_name
     errors = []
     try:
         data = load_json_file(path)
@@ -2249,12 +2248,6 @@ def load_agent_decisions(path, *, target_position_name, catalog_names, expected_
         return {}, ["决策文件根节点必须是对象"]
     if data.get("schema_version") != 1:
         errors.append("schema_version 必须为 1")
-    target = str(target_position_name or "").strip()
-    file_target = str(data.get("target_position_name") or "").strip()
-    if file_target != target:
-        errors.append(
-            f"target_position_name 不匹配：文件={file_target!r} 期望={target!r}"
-        )
     results = data.get("results")
     if not isinstance(results, list):
         errors.append("results 必须是数组")
@@ -2308,7 +2301,7 @@ def classify_list_jobs_from_agent(
     batch_index=None,
 ):
     """Route jobs using Agent decision map (no in-process LLM)."""
-    target = str(target_position_name or "").strip()
+    del target_position_name
     catalog_set = set(catalog_names or [])
     decisions = []
     current = []
@@ -2340,7 +2333,7 @@ def classify_list_jobs_from_agent(
             decisions.append(dec)
             none_rows.append(dec)
             continue
-        if seen is not None and skillver_job_in_seen(seen, eid):
+        if seen is not None and skillver_is_classified(seen, eid):
             dec["final_route"] = "skip"
             dec["skip_reason"] = "already_in_seen"
             decisions.append(dec)
@@ -2368,12 +2361,9 @@ def classify_list_jobs_from_agent(
         dec["classified_by"] = "agent"
         dec["system_position_name"] = pos
         if pos and pos in catalog_set:
-            if pos == target:
-                dec["final_route"] = "current"
-                current.append(job)
-            else:
-                dec["final_route"] = "other"
-                other.append((job, pos))
+            job["_classified_position"] = pos
+            dec["final_route"] = "current"
+            current.append(job)
             decisions.append(dec)
             continue
         dec["final_route"] = "none"
@@ -2414,62 +2404,15 @@ def filter_jobs_for_agent_classify(jobs, seen=None):
     return candidates, skips
 
 
-def apply_classification_to_seen(
-    seen,
-    *,
-    current_jobs,
-    other_jobs,
-    catalog_names,
-    classified_by_lookup=None,
-):
-    """Write X/Y inventory rows; none is not written."""
-    names = set(catalog_names or [])
-    lookup = classified_by_lookup or {}
-    for job in current_jobs or []:
-        eid = resolve_encrypt_job_id(job)
-        if not eid:
-            continue
-        mark_skillver_seen_classified(
-            seen,
-            key=eid,
-            job=job,
-            position_name=str(job.get("_classified_position") or "").strip()
-            or str(lookup.get(eid, {}).get("position_name") or ""),
-            classified_by=str(
-                lookup.get(eid, {}).get("classified_by") or "rule"
-            ),
-            catalog_names=names,
-        )
-    # Prefer explicit pairs for other
-    for item in other_jobs or []:
-        if isinstance(item, tuple):
-            job, pos = item
-        else:
-            job, pos = item, ""
-        eid = resolve_encrypt_job_id(job)
-        if not eid or not pos:
-            continue
-        mark_skillver_seen_classified(
-            seen,
-            key=eid,
-            job=job,
-            position_name=pos,
-            classified_by=str(
-                lookup.get(eid, {}).get("classified_by") or "rule"
-            ),
-            catalog_names=names,
-        )
-
-
-def route_and_inventory_classifications(
+def persist_classifications(
     seen,
     classify_result,
     target_position_name,
     catalog_names,
 ):
-    """Persist routed jobs into seen and return current-position jobs."""
+    """Persist routed jobs into seen and return all catalog-mapped jobs."""
+    del target_position_name
     names = set(catalog_names or [])
-    target = str(target_position_name or "").strip()
     lookup = {}
     for dec in classify_result.get("decisions") or []:
         eid = str(dec.get("encrypt_job_id") or "")
@@ -2481,56 +2424,59 @@ def route_and_inventory_classifications(
         eid = resolve_encrypt_job_id(job)
         if not eid:
             continue
-        mark_skillver_seen_classified(
-            seen,
-            key=eid,
-            job=job,
-            position_name=target,
-            classified_by=str(
-                (lookup.get(eid) or {}).get("classified_by") or "rule"
-            ),
-            catalog_names=names,
-        )
-        current_jobs.append(job)
-
-    for job, pos in classify_result.get("other") or []:
-        eid = resolve_encrypt_job_id(job)
-        if not eid or not pos:
-            continue
+        pos = str(
+            job.get("_classified_position")
+            or (lookup.get(eid) or {}).get("system_position_name")
+            or ""
+        ).strip()
         mark_skillver_seen_classified(
             seen,
             key=eid,
             job=job,
             position_name=pos,
             classified_by=str(
-                (lookup.get(eid) or {}).get("classified_by") or "rule"
+                (lookup.get(eid) or {}).get("classified_by") or "agent"
             ),
             catalog_names=names,
         )
-    return current_jobs
+        if pos:
+            current_jobs.append(job)
 
-
-def jobs_from_seen_ids(seen, ids, list_jobs_by_id=None):
-    """Build minimal job dicts for pending detail attempts."""
-    list_jobs_by_id = list_jobs_by_id or {}
-    jobs_map = seen.get("jobs") if isinstance(seen.get("jobs"), dict) else {}
-    out = []
-    for eid in ids or []:
-        if eid in list_jobs_by_id:
-            out.append(list_jobs_by_id[eid])
+    for job, pos in classify_result.get("other") or []:
+        eid = resolve_encrypt_job_id(job)
+        if not eid or not pos:
             continue
-        entry = jobs_map.get(eid) if isinstance(jobs_map.get(eid), dict) else {}
-        out.append({
-            "encrypt_job_id": eid,
-            "job_id": entry.get("job_id") or "",
-            "title": entry.get("title") or "",
-            "boss_name": entry.get("company") or "",
-            "company": entry.get("company") or "",
-            "salary": entry.get("salary") or "",
-            "location": entry.get("location") or "",
-            "job_link": entry.get("job_link") or "",
-        })
-    return out
+        job["_classified_position"] = pos
+        mark_skillver_seen_classified(
+            seen,
+            key=eid,
+            job=job,
+            position_name=pos,
+            classified_by=str(
+                (lookup.get(eid) or {}).get("classified_by") or "agent"
+            ),
+            catalog_names=names,
+        )
+        current_jobs.append(job)
+
+    for dec in classify_result.get("none") or []:
+        if dec.get("skip_reason") != "unclassified":
+            continue
+        eid = str(dec.get("encrypt_job_id") or "").strip()
+        if not eid:
+            continue
+        mark_skillver_seen_classified(
+            seen,
+            key=eid,
+            job={
+                "title": dec.get("title") or "",
+                "boss_name": dec.get("company") or "",
+            },
+            position_name="",
+            classified_by=str(dec.get("classified_by") or "agent"),
+            catalog_names=names,
+        )
+    return current_jobs
 
 
 def write_decision_report(path, payload):
@@ -2551,75 +2497,6 @@ def write_match_skip_report(path, payload):
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     print(f"匹配跳过报告: {report_path}")
-
-
-def write_review_csv(path, decisions, run_meta):
-    """Write human-review CSV with empty human_* columns."""
-    if not path:
-        return
-    report_path = os.path.abspath(os.path.expanduser(path))
-    os.makedirs(os.path.dirname(report_path) or ".", exist_ok=True)
-    headers = [
-        "run_id",
-        "timestamp",
-        "target_position_name",
-        "encrypt_job_id",
-        "title",
-        "company",
-        "tags",
-        "page",
-        "batch",
-        "entity_decision",
-        "classified_by",
-        "rule_top1",
-        "rule_top1_score",
-        "rule_top2",
-        "rule_top2_score",
-        "rule_margin",
-        "llm_status",
-        "system_position_name",
-        "final_route",
-        "skip_reason",
-        "human_entity",
-        "human_position_name",
-        "human_confidence",
-        "human_notes",
-    ]
-    with open(report_path, "w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
-        writer.writeheader()
-        for dec in decisions or []:
-            row = {h: "" for h in headers}
-            row.update({
-                "run_id": run_meta.get("run_id") or "",
-                "timestamp": run_meta.get("timestamp") or "",
-                "target_position_name": run_meta.get("target_position_name") or "",
-                "encrypt_job_id": dec.get("encrypt_job_id") or "",
-                "title": dec.get("title") or "",
-                "company": dec.get("company") or "",
-                "tags": dec.get("tags") or "",
-                "page": dec.get("page") if dec.get("page") is not None else "",
-                "batch": dec.get("batch") if dec.get("batch") is not None else "",
-                "entity_decision": dec.get("entity_decision") or "",
-                "classified_by": dec.get("classified_by") or "",
-                "rule_top1": dec.get("rule_top1") or "",
-                "rule_top1_score": dec.get("rule_top1_score")
-                if dec.get("rule_top1_score") is not None
-                else "",
-                "rule_top2": dec.get("rule_top2") or "",
-                "rule_top2_score": dec.get("rule_top2_score")
-                if dec.get("rule_top2_score") is not None
-                else "",
-                "rule_margin": dec.get("rule_margin")
-                if dec.get("rule_margin") is not None
-                else "",
-                "llm_status": dec.get("llm_status") or "",
-                "system_position_name": dec.get("system_position_name") or "",
-                "final_route": dec.get("final_route") or "",
-                "skip_reason": dec.get("skip_reason") or "",
-            })
-            writer.writerow(row)
-    print(f"人工评测表: {report_path}")
 
 
 def make_skillver_run_id(position_name):
@@ -2644,76 +2521,6 @@ def _load_existing_details_list(detail_output):
     return details
 
 
-def run_skillver_drain_inventory(
-    *,
-    position_binding,
-    catalog_names,
-    skillver_seen,
-    skillver_seen_path,
-    detail_output,
-    cdp_port,
-    fmt,
-    city_fallback="",
-    scrape_details_fn=None,
-):
-    """Open details for current-position pending_details (no Agent classify)."""
-    scrape_details_fn = scrape_details_fn or scrape_details
-    target = position_binding["position_name"]
-    catalog_set = set(catalog_names)
-    city_name = normalize_location(city_fallback)
-    details = _load_existing_details_list(detail_output)
-    seen_ids = skillver_seen_detail_ids(skillver_seen)
-    pending_snapshot = list(skillver_pending_details(skillver_seen, target))
-    baseline = skillver_count_details(skillver_seen, target)
-    print(
-        f"库存 pending_details: {len(pending_snapshot)}；"
-        f"历史详情 {baseline}"
-    )
-    inventory_attempts = []
-    if pending_snapshot:
-        inv_jobs = jobs_from_seen_ids(skillver_seen, pending_snapshot, {})
-        if city_name:
-            for job in inv_jobs:
-                if isinstance(job, dict) and not normalize_location(job.get("location")):
-                    job["location"] = city_name
-        before = {resolve_encrypt_job_id(j) for j in details}
-        details = scrape_details_fn(
-            {"jobs": inv_jobs, "city": city_name},
-            max_details=None,
-            output_path=detail_output,
-            cdp_port=cdp_port,
-            fmt=fmt,
-            seen_encrypt_job_ids=seen_ids,
-            title_include=None,
-            title_exclude=None,
-            position_binding=position_binding,
-            skillver_seen=skillver_seen,
-            skillver_seen_path=skillver_seen_path,
-            existing_details=details,
-            skip_headhunter_filter=True,
-            catalog_names=catalog_set,
-            city_fallback=city_name,
-        )
-        after = {resolve_encrypt_job_id(j) for j in details}
-        for eid in pending_snapshot:
-            inventory_attempts.append({
-                "encrypt_job_id": eid,
-                "success": bool(
-                    (eid in after and eid not in before)
-                    or skillver_seen.get("jobs", {}).get(eid, {}).get("has_details")
-                ),
-            })
-    new_count = max(0, skillver_count_details(skillver_seen, target) - baseline)
-    print(f"本轮库存新增详情: {new_count}")
-    return {
-        "details": details,
-        "inventory_pending_snapshot": len(pending_snapshot),
-        "inventory_attempts": inventory_attempts,
-        "details_new_this_run": new_count,
-        "details_count": skillver_count_details(skillver_seen, target),
-    }
-
-
 def run_skillver_list_only_batch(
     *,
     position_binding,
@@ -2726,20 +2533,25 @@ def run_skillver_list_only_batch(
     page_batch_size,
     list_start_page,
     list_output,
-    classify_input_path,
-    batch_index,
-    cdp_port,
-    fmt,
-    allow_dom_fallback,
+    list_batch_path=None,
+    classify_input_path=None,
+    batch_index=1,
+    cdp_port=DEFAULT_CDP_PORT,
+    fmt="json",
+    allow_dom_fallback=False,
     scrape_list_fn=None,
+    skillver_seen_path=None,
+    query=None,
 ):
-    """Scrape one page-batch, filter non-entity/seen, write classify_input for Agent."""
+    """Scrape one page-batch, filter non-entity/seen, write list_batch for clean A."""
     scrape_list_fn = scrape_list_fn or scrape_list
-    target = position_binding["position_name"]
+    target = str(query or search_keyword or (position_binding or {}).get("position_name") or "").strip()
     start = max(1, int(list_start_page or 1))
     batch = max(1, int(page_batch_size or DEFAULT_SKILLVER_PAGE_BATCH_SIZE))
-    hard_max = max(start, int(max_pages or DEFAULT_SKILLVER_MAX_PAGES))
-    end_page = min(hard_max, start + batch - 1)
+    if max_pages is not None:
+        end_page = min(max(start, int(max_pages)), start + batch - 1)
+    else:
+        end_page = start + batch - 1
     collected = []
     pages_used = 0
 
@@ -2770,38 +2582,59 @@ def run_skillver_list_only_batch(
             city_name = str(city or "").strip()
     payload = {
         "schema_version": 1,
+        "query": target,
         "target_position_name": target,
         "catalog_names": list(catalog_names),
         "batch_index": int(batch_index or 1),
         "list_start_page": start,
         "list_end_page": pages_used or end_page,
         "next_list_start_page": (
-            (pages_used or end_page) + 1
-            if (pages_used or end_page) < hard_max
-            else None
+            (pages_used or start) + 1 if collected else None
         ),
         "city": city_name,
-        "jobs": [
-            job_card_for_agent(j, city_fallback=city_name) for j in candidates
-        ],
+        "jobs": [],
         "skipped": skips,
         "raw_list_jobs": len(collected),
     }
-    out_path = classify_input_path or default_classify_input_path(
-        target, batch_index or 1
+    for item in candidates:
+        card = job_schema.project_list_job(item)
+        if not card.get("location") and city_name:
+            card["location"] = city_name
+        payload["jobs"].append(card)
+    for item in candidates:
+        eid = resolve_encrypt_job_id(item)
+        if not eid:
+            continue
+        mark_skillver_seen_listed(
+            skillver_seen,
+            key=eid,
+            job=item,
+            query=target,
+            catalog_names=set(catalog_names or []),
+        )
+    if skillver_seen_path:
+        try:
+            save_skillver_seen(skillver_seen_path, skillver_seen)
+        except OSError as exc:
+            log.warning(f"保存 seen 失败: {exc}")
+    out_path = (
+        list_batch_path
+        or classify_input_path
+        or default_list_batch_path(target, batch_index or 1)
     )
     write_json_file(out_path, payload)
     print(
-        f"list-only 批次 {batch_index}: 页 {start}-{payload['list_end_page']} "
-        f"原始 {len(collected)} → 待 Agent 归类 {len(candidates)}；"
+        f"list 批次 {batch_index}: 页 {start}-{payload['list_end_page']} "
+        f"原始 {len(collected)} → 待清洗/归类 {len(candidates)}；"
         f"已写 {out_path}"
     )
     if payload["next_list_start_page"]:
         print(f"下一批 --list-start-page {payload['next_list_start_page']}")
     else:
-        print("已无更多列表页（达到 --pages 上限或本批未推进）")
+        print("已无更多列表页（本页无卡片）")
     return {
         "list_data": list_data,
+        "list_batch_path": out_path,
         "classify_input_path": out_path,
         "classify_input": payload,
         "candidates": candidates,
@@ -2822,53 +2655,92 @@ def run_skillver_details_from_decisions(
     match_report_path=None,
     decision_report_path=None,
     city_fallback="",
+    jobs_path=None,
     scrape_details_fn=None,
+    min_details=None,
+    catalog=None,
+    query=None,
+    unexported_path=None,
 ):
-    """Apply Agent decisions then scrape current-position details."""
+    """Apply Agent decisions then scrape all catalog-mapped details."""
+    del min_details
     scrape_details_fn = scrape_details_fn or scrape_details
-    target = position_binding["position_name"]
+    target = str(query or (position_binding or {}).get("position_name") or "").strip()
     catalog_set = set(catalog_names)
-    try:
-        classify_input = load_json_file(classify_input_path)
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        raise ValueError(f"无法读取 classify-input: {exc}") from exc
-    jobs_meta = classify_input.get("jobs") or []
-    expected_ids = [
-        str(item.get("id") or "").strip()
-        for item in jobs_meta
-        if str(item.get("id") or "").strip()
-    ]
+    catalog_by_name = catalog_bindings_by_name(catalog)
+    batches = resolve_decision_batches(classify_input_path, decisions_path)
+    classify_input = {}
+    jobs_meta = []
+    expected_ids = []
+    mapping = {}
+    errors = []
+    for cin, dec in batches:
+        if cin:
+            try:
+                payload = load_json_file(cin)
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                raise ValueError(f"无法读取 classify-input: {exc}") from exc
+            classify_input = payload
+            batch_jobs = payload.get("jobs") or []
+            batch_ids = [
+                str(item.get("id") or "").strip()
+                for item in batch_jobs
+                if isinstance(item, dict) and str(item.get("id") or "").strip()
+            ]
+        else:
+            batch_jobs = []
+            batch_ids = []
+        part, batch_errors = load_agent_decisions(
+            dec,
+            catalog_names=catalog_names,
+            expected_ids=batch_ids,
+        )
+        errors.extend(batch_errors)
+        mapping.update(part)
+        jobs_meta.extend(item for item in batch_jobs if isinstance(item, dict))
+        if batch_ids:
+            expected_ids.extend(batch_ids)
+        else:
+            expected_ids.extend(part.keys())
+    if errors:
+        raise ValueError("决策文件不合契约: " + "; ".join(errors))
     city_name = normalize_location(
         city_fallback or classify_input.get("city") or ""
     )
-    # Rebuild job dicts for scraping (prefer full cards from input)
     jobs_by_id = {}
+    if jobs_path and os.path.isfile(jobs_path):
+        try:
+            stored = load_json_file(jobs_path)
+        except (OSError, json.JSONDecodeError, ValueError):
+            stored = {}
+        for item in stored.get("jobs") or []:
+            if not isinstance(item, dict):
+                continue
+            eid = resolve_encrypt_job_id(item)
+            if eid:
+                jobs_by_id[eid] = job_schema.project_list_job(item)
     for item in jobs_meta:
         if not isinstance(item, dict):
             continue
         eid = str(item.get("id") or "").strip()
         if not eid:
             continue
-        jobs_by_id[eid] = {
-            "title": item.get("title") or "",
-            "boss_name": item.get("company") or "",
-            "boss_title": item.get("boss_title") or "",
-            "salary": item.get("salary") or "",
-            "location": normalize_location(item.get("location") or "") or city_name,
-            "tags": item.get("tags") or "",
-            "job_link": item.get("job_link") or "",
+        base = dict(jobs_by_id.get(eid) or {})
+        merged = {
+            "title": base.get("title") or item.get("title") or "",
+            "boss_name": base.get("boss_name") or item.get("company") or "",
+            "boss_title": base.get("boss_title") or item.get("boss_title") or "",
+            "salary": base.get("salary") or item.get("salary") or "",
+            "location": normalize_location(
+                base.get("location") or item.get("location") or ""
+            ) or city_name,
+            "tags": base.get("tags") or item.get("tags") or "",
+            "job_link": base.get("job_link") or item.get("job_link") or "",
+            "security_id": base.get("security_id") or item.get("security_id") or "",
+            "lid": base.get("lid") or item.get("lid") or "",
             "encrypt_job_id": eid,
-            "job_id": item.get("job_id") or "",
         }
-
-    mapping, errors = load_agent_decisions(
-        decisions_path,
-        target_position_name=target,
-        catalog_names=catalog_names,
-        expected_ids=expected_ids,
-    )
-    if errors:
-        raise ValueError("决策文件不合契约: " + "; ".join(errors))
+        jobs_by_id[eid] = job_schema.project_list_job(merged)
 
     jobs = [jobs_by_id[eid] for eid in expected_ids if eid in jobs_by_id]
     batch_index = classify_input.get("batch_index")
@@ -2880,7 +2752,7 @@ def run_skillver_details_from_decisions(
         seen=skillver_seen,
         batch_index=batch_index,
     )
-    current_jobs = route_and_inventory_classifications(
+    current_jobs = persist_classifications(
         skillver_seen,
         result,
         target,
@@ -2893,7 +2765,7 @@ def run_skillver_details_from_decisions(
 
     details = _load_existing_details_list(detail_output)
     seen_ids = skillver_seen_detail_ids(skillver_seen)
-    baseline = skillver_count_details(skillver_seen, target)
+    baseline = skillver_count_details_all(skillver_seen)
     if current_jobs:
         details = scrape_details_fn(
             {"jobs": current_jobs},
@@ -2910,18 +2782,22 @@ def run_skillver_details_from_decisions(
             existing_details=details,
             skip_headhunter_filter=True,
             catalog_names=catalog_set,
+            catalog_by_name=catalog_by_name,
             city_fallback=city_name,
+            query=target,
+            unexported_path=unexported_path or DEFAULT_SKILLVER_UNEXPORTED,
         )
-    new_count = max(0, skillver_count_details(skillver_seen, target) - baseline)
+    new_count = max(0, skillver_count_details_all(skillver_seen) - baseline)
     run_meta = {
-        "run_id": make_skillver_run_id(target),
+        "run_id": make_skillver_run_id(target or "query"),
         "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "query": target,
         "target_position_name": target,
         "batch_index": batch_index,
         "classify_input_path": classify_input_path,
         "decisions_path": decisions_path,
         "details_new_this_run": new_count,
-        "details_count": skillver_count_details(skillver_seen, target),
+        "details_count": skillver_count_details_all(skillver_seen),
         "agent_stats": result.get("agent_stats") or {},
     }
     if decision_report_path:
@@ -2943,8 +2819,8 @@ def run_skillver_details_from_decisions(
             },
         )
     print(
-        f"details-from-decisions: 当前岗 {len(current_jobs)} / 他岗 "
-        f"{len(result.get('other') or [])} / none {len(result.get('none') or [])}；"
+        f"details-from-decisions: 已映射 {len(current_jobs)} / "
+        f"none {len(result.get('none') or [])}；"
         f"本批新增详情 {new_count}"
     )
     return {
@@ -2954,14 +2830,6 @@ def run_skillver_details_from_decisions(
         "match_skips": result.get("none") or [],
         "current_jobs": current_jobs,
     }
-
-
-def run_skillver_position_pipeline(**kwargs):
-    """Removed one-shot LLM pipeline. Use drain / list-only / details-from-decisions."""
-    raise RuntimeError(
-        "标准岗请改用 --drain-inventory / --list-only / --details-from-decisions "
-        "（Agent 归类，见 references/classify-decisions.md）"
-    )
 
 
 def parse_title_patterns(raw):
@@ -3028,7 +2896,10 @@ def scrape_details(list_data, max_details=None, output_path=None,
                    existing_details=None,
                    skip_headhunter_filter=False,
                    catalog_names=None,
-                   city_fallback=""):
+                   catalog_by_name=None,
+                   city_fallback="",
+                   query="",
+                   unexported_path=None):
     jobs = list(list_data.get("jobs", []) or [])
     city_name = normalize_location(
         city_fallback or (list_data or {}).get("city") or ""
@@ -3161,8 +3032,22 @@ def scrape_details(list_data, max_details=None, output_path=None,
             ws.close()
             continue
 
+        job_pos = str(job.get("_classified_position") or "").strip()
+        binding = None
+        if catalog_by_name and job_pos and job_pos in catalog_by_name:
+            binding = catalog_by_name[job_pos]
+        elif position_binding and position_binding.get("job_intent_id"):
+            binding = position_binding
+        elif job_pos:
+            binding = {
+                "position_name": job_pos,
+                "job_intent_id": "",
+                "job_intent_label": "",
+            }
+        else:
+            binding = position_binding
         detail = build_detail_record(
-            job, d, position=position_binding, city_fallback=city_name
+            job, d, position=binding, city_fallback=city_name
         )
         results.append(detail)
         detail_eid = detail.get("encrypt_job_id") or eid
@@ -3182,21 +3067,32 @@ def scrape_details(list_data, max_details=None, output_path=None,
                 json.dump(results, f, ensure_ascii=False, indent=2)
 
         # Skillver seen：详情成功后 has_details=true, exported=false（已导出则保留 true）
-        if (
-            skillver_seen is not None
-            and skillver_seen_path
-            and detail_eid
-            and position_binding
-        ):
+        if skillver_seen is not None and skillver_seen_path and detail_eid:
             try:
                 mark_skillver_seen_scraped(
                     skillver_seen,
                     key=detail_eid,
                     job_id=str(detail.get("job_id") or ""),
-                    position_name=str(position_binding.get("position_name") or ""),
+                    position_name=str(
+                        (binding or {}).get("position_name")
+                        or job_pos
+                        or ""
+                    ),
                     catalog_names=set(catalog_names) if catalog_names else None,
                 )
                 save_skillver_seen(skillver_seen_path, skillver_seen)
+                if unexported_path:
+                    add_skillver_unexported(
+                        key=detail_eid,
+                        query=query,
+                        details_path=output_path,
+                        position_name=str(
+                            (binding or {}).get("position_name")
+                            or job_pos
+                            or ""
+                        ),
+                        path=unexported_path,
+                    )
             except (OSError, TypeError, ValueError) as exc:
                 log.warning(f"写入 seen 失败（详情已保存）: {exc}")
 
@@ -3212,214 +3108,11 @@ def scrape_details(list_data, max_details=None, output_path=None,
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     print(f"\n详情已保存: {output_path}")
-
-    if fmt == "csv":
-        csv_path = output_path.rsplit(".", 1)[0] + ".csv"
-        write_detail_csv(csv_path, results)
     return results
 
 
-# ============================================================
-# 动态技术术语提取
-# ============================================================
-def extract_tech_terms_from_jds(details, search_keyword=""):
-    """从 JD 文本中动态提取高频技术术语。
-
-    策略：
-    1. 保留一个小的基础术语列表用于匹配
-    2. 对 JD 正文做分词频率分析，提取高频词
-    3. 将搜索关键词拆分后加入
-
-    Args:
-        details: 详情列表，每个含 "jd" 字段
-        search_keyword: 搜索关键词
-
-    Returns:
-        去重后的术语列表
-    """
-    # 基础技术术语（小列表，用于精确匹配）
-    base_tech_terms = [
-        "Java", "Spring", "Redis", "MySQL", "Kafka", "Flink", "Spark",
-        "Go", "Python", "微服务", "分布式", "高并发",
-        "AI", "LLM", "RAG", "Agent", "SQL", "Linux",
-    ]
-
-    # 从搜索关键词中提取词
-    keyword_terms = []
-    for word in re.split(r'[\s,，、]+', search_keyword):
-        word = word.strip()
-        if len(word) >= 2:
-            keyword_terms.append(word)
-
-    # 从 JD 文本中提取高频词
-    word_freq = Counter()
-    for d in details:
-        jd_text = d.get("jd", "")
-        if not jd_text:
-            continue
-        # 提取英文技术词（连续 2+ 字母的词）
-        en_words = re.findall(r'\b[A-Za-z][A-Za-z0-9._-]+\b', jd_text)
-        for w in en_words:
-            if len(w) >= 2 and len(w) <= 30:
-                word_freq[w] += 1
-        # 提取中文技术词（简单：连续中文字符 2-6 个）
-        cn_words = re.findall(r'[\u4e00-\u9fff]{2,6}', jd_text)
-        # 过滤常见非技术中文词
-        stop_words = {
-            "任职", "要求", "岗位", "职责", "描述", "优先", "具有",
-            "负责", "相关", "经验", "能力", "以上", "及其", "工作",
-            "开发", "团队", "项目", "公司", "业务", "熟悉", "熟练",
-            "了解", "掌握", "参与", "完成", "进行", "能够", "学历",
-            "专业", "提供", "福利", "加入", "我们", "我们只", "是通过",
-            "就是", "已经", "可以", "这个", "那个", "什么", "怎么",
-            "欢迎", "期待", "为你", "为你提供",
-        }
-        for w in cn_words:
-            if w not in stop_words:
-                word_freq[w] += 1
-
-    # 取频率最高的动态词（至少出现 2 次，取 top 60）
-    dynamic_terms = [
-        word for word, count in word_freq.most_common(60)
-        if count >= 2
-    ]
-
-    # 合并去重：基础 + 关键词 + 动态提取
-    all_terms = list(dict.fromkeys(
-        base_tech_terms + keyword_terms + dynamic_terms
-    ))
-    return all_terms
-
-
-# ============================================================
-# 分析报告
-# ============================================================
-def analyze(list_data, details=None, search_keyword=""):
-    jobs = list_data.get("jobs", [])
-    print(f"\n{'='*60}")
-    print(f"  分析报告: {list_data.get('keyword','')} @ {list_data.get('city','')}")
-    print(f"  共 {len(jobs)} 条职位")
-    print(f"{'='*60}")
-
-    # 1. 薪资分析
-    print(f"\n--- 薪资分布 ---")
-    salary_ranges = Counter()
-    for j in jobs:
-        s = j.get("salary", "")
-        if "K" in s:
-            salary_ranges[s] += 1
-        elif "元/天" in s:
-            salary_ranges[s] += 1
-        else:
-            salary_ranges["未标注"] += 1
-    for s, c in salary_ranges.most_common(15):
-        bar = "█" * c
-        print(f"  {s:<20} {c:>3}  {bar}")
-
-    # 2. 经验要求
-    print(f"\n--- 经验要求 ---")
-    exp_count = Counter()
-    for j in jobs:
-        tags = j.get("tags", "")
-        for t in tags.split(" | "):
-            if "年" in t or "应届" in t or "在校" in t or "经验不限" in t:
-                exp_count[t] += 1
-    for e, c in exp_count.most_common():
-        print(f"  {e:<15} {c}")
-
-    # 3. 学历要求
-    print(f"\n--- 学历要求 ---")
-    edu_count = Counter()
-    for j in jobs:
-        tags = j.get("tags", "")
-        for t in tags.split(" | "):
-            if t in ["大专", "本科", "硕士", "博士", "学历不限"]:
-                edu_count[t] += 1
-    for e, c in edu_count.most_common():
-        print(f"  {e:<10} {c}")
-
-    # 4. 地区分布
-    print(f"\n--- 地区分布 ---")
-    loc_count = Counter()
-    for j in jobs:
-        loc = j.get("location", "")
-        # Extract district
-        parts = loc.split("·")
-        if len(parts) >= 2:
-            loc_count[parts[1]] += 1
-        elif loc:
-            loc_count[loc] += 1
-    for l, c in loc_count.most_common(10):
-        print(f"  {l:<15} {c}")
-
-    # 5. 公司分布
-    print(f"\n--- 高频公司 ---")
-    company_count = Counter()
-    for j in jobs:
-        c = j.get("boss_name", "")
-        if c:
-            company_count[c] += 1
-    for c, n in company_count.most_common(10):
-        print(f"  {c:<25} {n} 个岗位")
-
-    # 6. 详情页的技能标签（如有）
-    body_freq = Counter()
-    if details:
-        print(f"\n--- 技能要求频次（来自 JD 标签）---")
-        skill_freq = Counter()
-        for d in details:
-            for tag in d.get("skill_tags", []):
-                skill_freq[tag] += 1
-        for s, c in skill_freq.most_common(25):
-            bar = "█" * c
-            print(f"  {s:<20} {c:>3}/{len(details)}  {bar}")
-
-        # 7. JD 正文关键词（动态提取）
-        print(f"\n--- JD 正文高频技术词 ---")
-        tech_terms = extract_tech_terms_from_jds(details, search_keyword)
-        for d in details:
-            jd_lower = d.get("jd", "").lower()
-            for term in tech_terms:
-                if term.lower() in jd_lower:
-                    body_freq[term] += 1
-        for t, c in body_freq.most_common(25):
-            pct = c / len(details) * 100
-            bar = "█" * c
-            print(f"  {t:<20} {c:>3}/{len(details)} ({pct:.0f}%)  {bar}")
-
-    # 8. 简历建议
-    print(f"\n--- 简历建议 ---")
-    if details and body_freq:
-        noise_list = {'BOSS直聘', 'boss', 'BOSS', '来自BOSS直聘', '金', '金币'}
-        top_skills = [s for s, _ in Counter(
-            tag for d in details for tag in d.get("skill_tags", [])
-        ).most_common(10)]
-        # 如果有效标签太少或都是噪音，用 JD 正文关键词代替
-        valid_skills = [s for s in top_skills if len(s) >= 2 and s not in noise_list]
-        if len(valid_skills) < 3:
-            top_skills = [t for t, _ in body_freq.most_common(10)]
-        top_body = [t for t, _ in body_freq.most_common(8)] if body_freq else []
-        print(f"  技能关键词: {', '.join(top_skills)}")
-        print(f"  正文高频词: {', '.join(top_body)}")
-        # Experience requirement
-        if exp_count:
-            top_exp = exp_count.most_common(1)[0][0]
-            print(f"  经验要求主流: {top_exp}")
-        if edu_count:
-            top_edu = edu_count.most_common(1)[0][0]
-            print(f"  学历要求主流: {top_edu}")
-    else:
-        print("  提示: 用 --detail 抓取 JD 详情后可获得更精准的简历建议")
-
-
 def parse_jobs_eval_value(value):
-    if not value:
-        return []
-    try:
-        parsed = json.loads(value) if isinstance(value, str) else value
-    except (json.JSONDecodeError, ValueError, TypeError):
-        return []
-    return parsed if isinstance(parsed, list) else []
+    return parse_api_jobs_eval_value(value)
 
 
 def has_usable_smoke_jobs(jobs):
@@ -3429,7 +3122,6 @@ def has_usable_smoke_jobs(jobs):
         if (
             job.get("title")
             and job.get("salary")
-            and job.get("salary_source") == "api"
             and job.get("job_link")
         ):
             return True
@@ -3472,55 +3164,84 @@ def run_smoke_test(cdp_port=DEFAULT_CDP_PORT):
 # --check 环境检查
 # ============================================================
 def run_check(cdp_port=DEFAULT_CDP_PORT):
-    """运行环境诊断检查"""
+    """运行环境诊断：uv → 安装（如需要）→ uv sync → CDP → 登录。"""
     print("=" * 50)
     print("  BOSS直聘 CDP 环境检查")
     print("=" * 50)
     print()
 
     all_pass = True
+    env = _load_ensure_uv_env()
+    if env is None:
+        print("[1/5] uv...")
+        print("  ❌ 找不到 scripts/ensure_uv_env.py")
+        print()
+        print("❌ 部分检查未通过，请修复后重试")
+        print()
+        return 1
 
-    # 检查 1: Python 依赖
-    print("[1/3] Python 依赖...")
-    deps_ok = require_runtime_dependencies("websocket", "requests")
-    if requests is not None:
-        print(f"  ✅ requests 可导入")
-    if websocket is not None:
-        print(f"  ✅ websocket 可导入")
-    if deps_ok:
-        print(f"  ✅ 依赖完整")
+    print("[1/5] uv...")
+    uv = env.which_uv()
+    if uv:
+        print(f"  ✅ 已安装: {uv}")
     else:
-        all_pass = False
+        uv = env.install_uv()
+        if uv:
+            print(f"  ✅ 已安装: {uv}")
+        else:
+            print("  ❌ 无法安装 uv")
+            all_pass = False
 
-    # 检查 2: CDP 端口连通性
-    print("[2/3] CDP 端口连通性...")
+    print("[2/5] uv sync（本 skill 的 .venv）...")
+    if not all_pass:
+        print("  ❌ 跳过 — 没有 uv")
+    elif not env.uv_sync(uv):
+        all_pass = False
+    elif not env.running_in_skill_venv():
+        env.reexec_with_uv(uv)
+
+    print("[3/5] Python 依赖...")
+    deps_ok = False
+    if all_pass:
+        deps_ok = require_runtime_dependencies("websocket", "requests")
+        if requests is not None:
+            print("  ✅ requests 可导入")
+        if websocket is not None:
+            print("  ✅ websocket 可导入")
+        if deps_ok:
+            print("  ✅ 依赖完整")
+        else:
+            all_pass = False
+    else:
+        print("  ❌ 跳过 — 项目环境未就绪")
+
+    print("[4/5] CDP 端口连通性...")
     if requests is None:
-        print(f"  ❌ 跳过 — 缺少 requests")
+        print("  ❌ 跳过 — 缺少 requests")
         all_pass = False
     else:
         try:
             resp = requests.get(f"http://127.0.0.1:{cdp_port}/json/version", timeout=5)
             data = resp.json()
             browser = data.get("Browser", "未知")
-            print(f"  ✅ 通过 — {browser}")
+            print(f"  ✅ 通过 — 浏览器 {browser}")
         except (requests.ConnectionError, requests.Timeout):
             print(f"  ❌ 失败 — 无法连接 127.0.0.1:{cdp_port}")
-            print(f"     请先启动浏览器 CDP (Chrome/Edge): python3 {__file__} --setup-chrome")
+            print("     请先启动浏览器 CDP: python scripts/chrome_cdp.py --setup-chrome")
             all_pass = False
         except (json.JSONDecodeError, KeyError) as e:
             print(f"  ❌ 失败 — CDP 响应异常: {e}")
             all_pass = False
 
-    # 检查 3: BOSS直聘登录状态
-    print("[3/3] BOSS直聘登录状态...")
+    print("[5/5] BOSS直聘登录状态...")
     if not deps_ok:
-        print(f"  ❌ 跳过 — 缺少运行依赖")
+        print("  ❌ 跳过 — 缺少运行依赖")
         all_pass = False
     else:
         try:
             login_result = check_login_state(cdp_port)
             if login_result.status is LoginProbeStatus.AVAILABLE:
-                print(f"  ✅ 已登录")
+                print("  ✅ 已登录")
             elif login_result.status is LoginProbeStatus.EMPTY:
                 print(f"  ⚠️  {describe_login_probe_result(login_result)}")
                 all_pass = False
@@ -3545,7 +3266,7 @@ def run_check(cdp_port=DEFAULT_CDP_PORT):
 # --setup-chrome 自动启动
 # ============================================================
 def prepare_cdp_profile(copy_login_state=False, reset=False):
-    """Prepare an isolated persistent browser (Chrome/Edge) profile for CDP."""
+    """Prepare an isolated persistent Chrome profile for CDP."""
     cdp_data_dir = DEFAULT_CDP_DATA_DIR
     cdp_default = os.path.join(cdp_data_dir, "Default")
 
@@ -3592,16 +3313,15 @@ def is_cdp_ready(cdp_port):
 
 
 def is_chrome_command(command):
-    """判断命令行是否属于 Chromium 内核浏览器（Chrome / Edge / Chromium）。"""
     lower = (command or "").lower()
     return any(token in lower for token in (
         "google chrome",
         "google-chrome",
         "chromium",
         "chrome.exe",
-        "msedge",
+        "msedge.exe",
         "microsoft-edge",
-        "edge.exe",
+        "microsoft edge",
     ))
 
 
@@ -3623,8 +3343,7 @@ def iter_chrome_process_commands():
     """Return (pid, command line) tuples for Chrome-like browser processes."""
     if platform.system() == "Windows":
         ps_script = (
-            "Get-CimInstance Win32_Process -Filter "
-            "\"name = 'chrome.exe' OR name = 'msedge.exe'\" | "
+            "Get-CimInstance Win32_Process -Filter \"name = 'msedge.exe' OR name = 'chrome.exe'\" | "
             "Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
         )
         try:
@@ -3748,7 +3467,7 @@ def wait_for_cdp(cdp_port, timeout=30):
             print(f"\n✅ CDP 已就绪 (端口 {cdp_port})")
             return True
     print(f"\n❌ 等待超时 ({timeout}s)，CDP 未就绪")
-    print(f"   请手动检查浏览器 (Chrome/Edge) 是否启动，端口 {cdp_port} 是否开放")
+    print(f"   请手动检查浏览器是否启动，端口 {cdp_port} 是否开放")
     return False
 
 
@@ -3771,12 +3490,12 @@ def launch_chrome(cmd):
 def run_setup_chrome(cdp_port=DEFAULT_CDP_PORT, copy_login_state=False,
                      reset_profile=False, wait_login=True,
                      login_timeout=DEFAULT_LOGIN_TIMEOUT):
-    """自动配置并启动浏览器 (Chrome/Edge) CDP 模式"""
+    """自动配置并启动 Chrome CDP 模式"""
     if not require_runtime_dependencies("requests"):
         return 1
 
     print("=" * 50)
-    print("  设置浏览器 CDP 调试模式 (Chrome/Edge)")
+    print("  设置浏览器 CDP 调试模式（Windows 优先 Edge）")
     print("=" * 50)
     print()
 
@@ -3804,7 +3523,7 @@ def run_setup_chrome(cdp_port=DEFAULT_CDP_PORT, copy_login_state=False,
     if stopped:
         print(f"\n已关闭 {stopped} 个旧的 BOSS CDP 浏览器进程")
 
-    print(f"\n启动浏览器 (Chrome/Edge, CDP 端口: {cdp_port})...")
+    print(f"\n启动浏览器 (CDP 端口: {cdp_port})...")
     cmd = [
         DEFAULT_CHROME_PATH,
         f"--remote-debugging-port={cdp_port}",
@@ -3819,16 +3538,16 @@ def run_setup_chrome(cdp_port=DEFAULT_CDP_PORT, copy_login_state=False,
         return 1
 
     print()
-    print("浏览器已启动。请在这个专用浏览器中登录 zhipin.com。")
+    print("浏览器已启动。请在这个专用窗口中登录 zhipin.com。")
     if wait_login:
         print()
         if not wait_for_login(cdp_port, timeout=login_timeout):
             return 1
     print()
     print(f"示例:")
-    print(f"  uv run python3 scripts/boss_cdp_raw.py --keyword \"AI Agent\" --city 上海 --pages 3")
-    print(f"  uv run python3 scripts/boss_cdp_raw.py --check")
-    print(f"  uv run python3 scripts/boss_cdp_raw.py --stop-chrome   # 抓完关闭专用浏览器")
+    print(f"  uv run python3 scripts/scrape_list.py --query \"阶跃星辰\" --city 上海")
+    print(f"  uv run python3 scripts/chrome_cdp.py --check")
+    print(f"  uv run python3 scripts/chrome_cdp.py --stop-chrome")
     print()
     return 0
 
@@ -3853,7 +3572,7 @@ def run_stop_chrome():
     else:
         print(f"\nℹ️  没有找到运行中的 BOSS 专用浏览器进程 (profile: {cdp_data_dir})")
     print()
-    print("提示：仅关闭 scraper 隔离 profile 的浏览器，不影响你的主浏览器 (Chrome/Edge)。")
+    print("提示：仅关闭 scraper 隔离 profile 的浏览器，不影响你的主浏览器。")
     print()
     return 0
 
@@ -3861,47 +3580,13 @@ def run_stop_chrome():
 # ============================================================
 # 批内多岗编排（批间休息由人工控制）
 # ============================================================
-def resolve_title_filters_from_args(args):
-    """Build title include/exclude lists from CLI flags."""
-    include = parse_title_patterns(getattr(args, "title_include", None))
-    exclude = parse_title_patterns(getattr(args, "title_exclude", None))
-    if getattr(args, "title_filter_pm", False):
-        if not include:
-            include = list(DEFAULT_PM_TITLE_INCLUDE)
-        if not exclude:
-            exclude = list(DEFAULT_PM_TITLE_EXCLUDE)
-    return include or None, exclude or None
-
-
-def seen_detail_roots_from_args(args):
-    """Directories/files to scan for already-scraped detail encrypt_job_id values."""
-    roots = []
-    for value in (
-        getattr(args, "seen_details_dir", None),
-        getattr(args, "output_dir", None),
-        os.path.dirname(os.path.abspath(args.detail_output)) if getattr(args, "detail_output", None) else None,
-        os.path.dirname(os.path.abspath(args.output)) if getattr(args, "output", None) else None,
-        DEFAULT_RESULT_DIR,
-    ):
-        if value:
-            roots.append(value)
-    deduped = []
-    seen = set()
-    for root in roots:
-        normalized = os.path.abspath(os.path.expanduser(root))
-        if normalized not in seen:
-            deduped.append(normalized)
-            seen.add(normalized)
-    return deduped
-
-
 def ensure_scrape_login(cdp_port):
     """Probe login once; exit-style return code semantics via raised SystemExit not used — return result."""
     print("检测登录状态...")
     login_result = check_login_state(cdp_port)
     if login_result.status is LoginProbeStatus.UNAUTHENTICATED:
-        print("❌ 未检测到 BOSS直聘登录状态。请先在浏览器 (Chrome/Edge) 中登录 zhipin.com。")
-        print("   可运行 --check 检查环境，或 --setup-chrome 启动浏览器 (Chrome/Edge)。")
+        print("❌ 未检测到 BOSS直聘登录状态。请先在专用浏览器中登录 zhipin.com。")
+        print("   可运行 --check 检查环境，或 --setup-chrome 启动浏览器。")
         return False
     if login_result.status is LoginProbeStatus.RESTRICTED:
         print(f"❌ {describe_login_probe_result(login_result)}，已停止抓取。")
@@ -3917,362 +3602,10 @@ def ensure_scrape_login(cdp_port):
     return True
 
 
-def run_keyword_batch(
-    keywords,
-    *,
-    city,
-    pages,
-    filters,
-    output_dir,
-    max_details=None,
-    cdp_port=DEFAULT_CDP_PORT,
-    fmt="json",
-    detail=True,
-    allow_dom_fallback=False,
-    position_gap=DEFAULT_POSITION_GAP_SEC,
-    seen_roots=None,
-    analysis=False,
-    sleeper=time.sleep,
-    title_include=None,
-    title_exclude=None,
-):
-    """Scrape up to MAX_BATCH_KEYWORDS keywords with inter-position gaps; no cross-batch automation."""
-    output_dir = os.path.abspath(os.path.expanduser(output_dir))
-    os.makedirs(output_dir, exist_ok=True)
-    roots = list(seen_roots or [])
-    if output_dir not in roots:
-        roots.insert(0, output_dir)
-    seen_ids = load_seen_encrypt_job_ids(roots)
-    print(f"本批岗位数: {len(keywords)}（上限 {MAX_BATCH_KEYWORDS}）")
-    print(f"输出目录: {output_dir}")
-    print(f"已加载已抓详情 encrypt_job_id: {len(seen_ids)} 个")
-    print(
-        f"岗间等待: {position_gap[0]}-{position_gap[1]} 秒 "
-        f"（约 {position_gap[0] / 60:.0f}-{position_gap[1] / 60:.0f} 分钟）"
-    )
-    print("批间休息请人工控制；本命令结束后不会自动开始下一批。\n")
-
-    for index, keyword in enumerate(keywords, start=1):
-        slug = keyword_output_slug(keyword, index)
-        list_path = os.path.join(output_dir, f"boss_jobs_{slug}.json")
-        detail_path = os.path.join(output_dir, f"boss_details_{slug}.json")
-        print(f"\n######## [{index}/{len(keywords)}] {keyword} ########\n")
-
-        list_data = scrape_list(
-            keyword,
-            city,
-            pages,
-            filters,
-            list_path,
-            cdp_port=cdp_port,
-            fmt=fmt,
-            allow_dom_fallback=allow_dom_fallback,
-        )
-        details = None
-        if detail and list_data.get("jobs"):
-            details = scrape_details(
-                list_data,
-                max_details,
-                detail_path,
-                cdp_port=cdp_port,
-                fmt=fmt,
-                seen_encrypt_job_ids=seen_ids,
-                title_include=title_include,
-                title_exclude=title_exclude,
-            )
-        if analysis:
-            analyze(list_data, details, search_keyword=keyword)
-
-        if index < len(keywords):
-            sleep_between_positions(position_gap, sleeper=sleeper)
-
-    print("\n✅ 本批岗位已全部完成。请人工休息后再执行下一批命令。")
-    return seen_ids
-
-
-# ============================================================
-# main
-# ============================================================
-def main():
-    p = argparse.ArgumentParser(
-        description=f"BOSS直聘抓取 + 分析 (CDP Raw) v{__version__}",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-筛选参数示例:
-  --scale 305          公司规模（支持多选：--scale 305,306 或重复 --scale）
-  --stage 807          融资阶段 (801=未融资 ... 807=已上市 808=不需要融资)
-  --salary 406         薪资范围 (402=3K以下 403=3-5K 404=5-10K 405=10-20K 406=20-50K 407=50K+)
-  --experience 105     经验要求（支持多选：--experience 101,102 或重复 --experience）
-  --degree 203         学历要求 (209=初中及以下 208=中专/中技 206=高中 202=大专 203=本科 204=硕士 205=博士)
-  --industry 1001      行业 (1001=互联网 1002=电商 1003=金融 ...)
-
-城市支持中文: --city 上海  或代码: --city 101020100
-
-示例:
-  # 标准岗分步（Agent 归类，见 references/classify-decisions.md）
-  %(prog)s --position-name "Agent工程师" --drain-inventory
-  %(prog)s --position-name "Agent工程师" --city 上海 --list-only --list-start-page 1
-  %(prog)s --position-name "Agent工程师" \
-    --classify-input data/skillver/exports/classify_input_xxx_1.json \
-    --details-from-decisions data/skillver/exports/classify_decisions_xxx_1.json
-
-  # 环境检查 / 启动 Chrome
-  %(prog)s --check
-  %(prog)s --setup-chrome
-
-  # legacy：--keywords-file 已退出主路径
-        """)
-    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    p.add_argument(
-        "--position-name",
-        default=None,
-        help="标准岗名称（必须命中 data/skillver/position_catalog.json；主路径搜索词）",
-    )
-    p.add_argument(
-        "--catalog",
-        default=DEFAULT_SKILLVER_CATALOG,
-        help=f"标准岗 catalog（默认 {DEFAULT_SKILLVER_CATALOG}）",
-    )
-    p.add_argument(
-        "--seen",
-        default=DEFAULT_SKILLVER_SEEN,
-        help=f"Skillver seen_jobs.json（默认 {DEFAULT_SKILLVER_SEEN}）",
-    )
-    p.add_argument(
-        "--keyword",
-        default=None,
-        help="[legacy] 自由搜索词；主路径请用 --position-name",
-    )
-    p.add_argument(
-        "--keywords-file",
-        default=None,
-        help="[legacy] 批内多岗 JSON；已退出主路径，请改用 --position-name",
-    )
-    p.add_argument("--city", default=DEFAULT_CITY_INPUT, help=f"城市 (中文名或代码，默认 {DEFAULT_CITY_INPUT})")
-    p.add_argument(
-        "--pages",
-        type=int,
-        default=DEFAULT_SKILLVER_MAX_PAGES,
-        help=(
-            f"标准岗搜索页预算/硬上限（默认 {DEFAULT_SKILLVER_MAX_PAGES}；"
-            f"全局上限 {MAX_PAGES}）"
-        ),
-    )
-    p.add_argument(
-        "--page-batch-size",
-        type=int,
-        default=DEFAULT_SKILLVER_PAGE_BATCH_SIZE,
-        help=(
-            f"list-only 每批抓取页数（默认 {DEFAULT_SKILLVER_PAGE_BATCH_SIZE}）"
-        ),
-    )
-    p.add_argument(
-        "--list-start-page",
-        type=int,
-        default=1,
-        help="list-only 起始页（默认 1；下一批用 classify_input.next_list_start_page）",
-    )
-    p.add_argument(
-        "--batch-index",
-        type=int,
-        default=1,
-        help="list-only / 决策文件批次号（默认 1，用于默认文件名）",
-    )
-    p.add_argument(
-        "--drain-inventory",
-        action="store_true",
-        help="仅清空当前岗 pending_details（开详情，不经 Agent 归类）",
-    )
-    p.add_argument(
-        "--list-only",
-        action="store_true",
-        help="仅抓一批列表并写出 classify_input（待 Agent 归类）",
-    )
-    p.add_argument(
-        "--classify-input",
-        default=None,
-        help="list-only 产出的 classify_input JSON（details-from-decisions 必填）",
-    )
-    p.add_argument(
-        "--details-from-decisions",
-        default=None,
-        metavar="PATH",
-        help="Agent 决策 JSON 路径（见 references/classify-decisions.md）",
-    )
-    p.add_argument(
-        "--min-details",
-        type=int,
-        default=None,
-        help=(
-            f"本轮目标新增详情数提示值（默认 {DEFAULT_SKILLVER_MIN_DETAILS}，"
-            f"上限 {DEFAULT_SKILLVER_MAX_MIN_DETAILS}；由 Agent 循环控制，"
-            "脚本单次调用不自动循环）"
-        ),
-    )
-    p.add_argument(
-        "--match-report",
-        default=None,
-        help="标准岗匹配跳过报告 JSON（默认 data/skillver/exports/match_skip_<岗名>.json）",
-    )
-    p.add_argument(
-        "--decision-report",
-        default=None,
-        help="完整分类决策报告 JSON（默认 data/skillver/exports/decisions_<岗名>.json）",
-    )
-    p.add_argument(
-        "--review-csv",
-        default=None,
-        help="人工评测 CSV（默认 data/skillver/eval/review_<run_id>.csv）",
-    )
-    p.add_argument(
-        "--output",
-        default=None,
-        help=f"列表 JSON 路径（默认 {DEFAULT_SKILLVER_JOBS_DIR}/boss_jobs_<岗名>.json）",
-    )
-    p.add_argument(
-        "--detail-output",
-        default=None,
-        help=f"详情 JSON 路径（默认 {DEFAULT_SKILLVER_DETAILS_DIR}/boss_details_<岗名>.json）",
-    )
-    p.add_argument(
-        "--output-dir",
-        default=None,
-        help="[legacy] 批模式输出目录（配合 --keywords-file）",
-    )
-    p.add_argument(
-        "--position-gap",
-        default="480-900",
-        help="批内岗间等待秒数，支持固定值或区间（默认 480-900，即 8-15 分钟）",
-    )
-    p.add_argument(
-        "--seen-details-dir",
-        default=None,
-        help="扫描已抓详情 JSON 的目录（按 encrypt_job_id 去重；默认含 --output-dir）",
-    )
-    p.add_argument("--cdp-port", type=int, default=DEFAULT_CDP_PORT,
-                   help=f"CDP 调试端口 (默认 {DEFAULT_CDP_PORT})")
-    p.add_argument("--format", default="json", choices=["json", "csv"],
-                   help="输出格式 (默认 json)")
-    p.add_argument("--merge", default=None,
-                   help="合并已有 JSON 文件 (按 job_id 去重)")
-
-    # 筛选参数（experience/scale 支持逗号多选与重复参数）
-    p.add_argument(
-        "--scale",
-        action="append",
-        default=None,
-        help="公司规模代码（可逗号多选或重复传入，如 305,306）",
-    )
-    p.add_argument("--stage", default=None, help="融资阶段代码")
-    p.add_argument("--salary", default=None, help="薪资范围代码")
-    p.add_argument(
-        "--experience",
-        action="append",
-        default=None,
-        help="经验要求代码（可逗号多选或重复传入，如 101,102）",
-    )
-    p.add_argument("--degree", default=None, help="学历要求代码")
-    p.add_argument("--industry", default=None, help="行业代码")
-
-    # 功能开关
-    p.add_argument("--detail", action="store_true", default=True, help="抓取详情页 JD（默认开启）")
-    p.add_argument("--no-detail", dest="detail", action="store_false", help="不抓取详情页")
-    p.add_argument(
-        "--max-details",
-        type=int,
-        default=None,
-        help=(
-            "兼容别名：非标准岗仍表示本次最多开多少详情页；"
-            f"标准岗请用 --min-details（默认 {DEFAULT_SKILLVER_MIN_DETAILS}，不再硬截断）"
-        ),
-    )
-    p.add_argument(
-        "--title-include",
-        default=None,
-        help="详情前标题需包含的关键词（逗号分隔，命中任一即保留；"
-             "如: 产品经理,产品运营）。仅影响详情，列表 JSON 仍保留原始结果",
-    )
-    p.add_argument(
-        "--title-exclude",
-        default=None,
-        help="详情前标题排除关键词（逗号分隔，命中任一即丢弃；"
-             "如: 工程师,开发,算法,销售,老师）",
-    )
-    p.add_argument(
-        "--title-filter-pm",
-        action="store_true",
-        help="启用产品经理标题预设：保留「产品经理/产品运营」，"
-             "排除工程师/开发/算法/销售等（可与 --title-include/--title-exclude 叠加，"
-             "CLI 显式参数优先）",
-    )
-    p.add_argument("--analysis", action="store_true", help="输出分析报告")
-    p.add_argument("--input", default=None, help="从已有 JSON 文件读取（跳过抓取）")
-    p.add_argument("--allow-dom-fallback", action="store_true",
-                   help="API 无数据时允许降级 DOM 提取（薪资可能受字体反爬影响，默认关闭）")
-
-    # 工具命令
-    p.add_argument("--check", action="store_true", help="运行环境诊断检查")
-    p.add_argument("--smoke-test", action="store_true",
-                   help="用真实浏览器 (Chrome/Edge)/CDP 跑一次 BOSS 搜索 API smoke test（不写结果文件）")
-    p.add_argument("--list-cities", nargs="?", const="", default=None,
-                   metavar="关键词",
-                   help="打印支持的城市列表（可选关键词过滤，如 --list-cities 江）；"
-                        "支持全国城市，码表见 data/city_codes.json，运行时自动从 BOSS 同步")
-    p.add_argument("--setup-chrome", action="store_true",
-                   help="自动启动浏览器 CDP 调试模式 (Chrome/Edge)")
-    p.add_argument("--copy-login-state", action="store_true",
-                   help="手动从主浏览器 (Chrome/Edge) 导入 Local State + Cookie 相关文件到独立 profile（默认、首次启动、重复启动都不复制）")
-    p.add_argument("--reset-chrome-profile", action="store_true",
-                   help="重建 BOSS 专用浏览器 profile，会清除此专用浏览器内的登录态")
-    p.add_argument("--no-wait-login", action="store_true",
-                   help="--setup-chrome 启动后不等待 BOSS 登录完成")
-    p.add_argument("--login-timeout", type=int, default=DEFAULT_LOGIN_TIMEOUT,
-                   help=f"--setup-chrome 等待登录完成的秒数 (默认 {DEFAULT_LOGIN_TIMEOUT})")
-    p.add_argument("--stop-chrome", action="store_true",
-                   help="关闭 BOSS 专用 CDP 浏览器（按隔离 profile 精准匹配，不影响主浏览器）")
-    p.add_argument("--close-chrome", action="store_true",
-                   help="抓取正常结束后自动关闭专用浏览器（默认不关；异常退出不触发，保留登录态）")
-
-    args = p.parse_args()
-
-    # --check 模式
-    if args.check:
-        sys.exit(run_check(args.cdp_port))
-
-    if args.smoke_test:
-        sys.exit(run_smoke_test(args.cdp_port))
-
-    # --list-cities 模式（无需 Chrome/网络依赖，本地静态码表兜底）
-    if args.list_cities is not None:
-        list_cities(keyword=args.list_cities or None)
-        sys.exit(0)
-
-    # --setup-chrome 模式
-    if args.setup_chrome:
-        sys.exit(run_setup_chrome(
-            args.cdp_port,
-            copy_login_state=args.copy_login_state,
-            reset_profile=args.reset_chrome_profile,
-            wait_login=not args.no_wait_login,
-            login_timeout=args.login_timeout,
-        ))
-
-    # --stop-chrome 模式（关闭 BOSS 专用 CDP Chrome，独立命令）
-    if args.stop_chrome:
-        sys.exit(run_stop_chrome())
-
-    if not require_runtime_dependencies("requests", "websocket"):
-        sys.exit(1)
-
-    # 页数限制
-    if args.pages > MAX_PAGES:
-        print(f"⚠️ 页数 {args.pages} 超过上限 {MAX_PAGES}，已自动调整为 {MAX_PAGES}")
-        args.pages = MAX_PAGES
-
-    # 收集筛选条件（experience/scale 规范化为有序去重列表）
+def filters_from_args(args):
     filters = {}
     for key in ["scale", "stage", "salary", "experience", "degree", "industry"]:
-        val = getattr(args, key)
+        val = getattr(args, key, None)
         if not val:
             continue
         if key in MULTI_SELECT_FILTER_KEYS:
@@ -4282,420 +3615,31 @@ def main():
             continue
         filters[key] = val
     filters = normalize_filters_dict(filters)
+    job_type = getattr(args, "job_type", None)
+    if job_type:
+        job_type_code = resolve_job_type(job_type)
+        if job_type_code:
+            filters["jobType"] = job_type_code
+            filters = normalize_filters_dict(filters)
+    return filters
 
-    try:
-        position_gap = parse_position_gap(args.position_gap)
-    except ValueError as e:
-        print(f"❌ {e}")
-        sys.exit(1)
 
-    title_include, title_exclude = resolve_title_filters_from_args(args)
+def add_filter_arguments(parser):
+    parser.add_argument("--scale", action="append", default=None)
+    parser.add_argument("--stage", default=None)
+    parser.add_argument("--salary", default=None)
+    parser.add_argument("--experience", action="append", default=None)
+    parser.add_argument("--degree", default=None)
+    parser.add_argument("--industry", default=None)
+    parser.add_argument("--job-type", default=None)
 
-    if args.keywords_file:
-        print(
-            "❌ --keywords-file 已退出主路径（legacy）。"
-            "请改用 --position-name 逐岗抓取。"
-        )
-        sys.exit(1)
 
-    will_scrape_list = not args.input
-    will_scrape_details = bool(args.detail)
-    needs_standard_position = will_scrape_list or will_scrape_details
-
-    position_binding = None
-    skillver_seen = None
-    skillver_seen_path = None
-    catalog_rows = None
-    catalog_names = []
-    search_keyword = args.keyword
-    match_skips = []
-
-    if needs_standard_position:
-        if not args.position_name:
-            print(
-                "❌ 标准岗抓取须指定 --position-name"
-                f"（catalog: {args.catalog}）"
-            )
-            sys.exit(1)
-        try:
-            catalog_rows = load_position_catalog(args.catalog)
-            position_binding = resolve_standard_position(
-                args.position_name, catalog=catalog_rows
-            )
-        except SystemExit as exc:
-            print(f"❌ {exc}")
-            sys.exit(1)
-        except (OSError, json.JSONDecodeError, ValueError, ImportError) as exc:
-            print(f"❌ 无法加载标准岗 catalog: {exc}")
-            sys.exit(1)
-
-        catalog_names = catalog_position_names(catalog_rows)
-        search_keyword = position_binding["position_name"]
-        print(
-            f"标准岗: {position_binding['position_name']} "
-            f"({position_binding['job_intent_id']} / "
-            f"{position_binding['job_intent_label']})"
-        )
-
-        # 标准岗模式：忽略旧 title 过滤；页数/最低详情按 P6 默认
-        if title_include or title_exclude or args.title_filter_pm:
-            print(
-                "ℹ️  标准岗模式已忽略 --title-include / --title-exclude / "
-                "--title-filter-pm（改用 Agent 决策归类）"
-            )
-        title_include, title_exclude = None, None
-
-        if args.pages > DEFAULT_SKILLVER_MAX_PAGES:
-            print(
-                f"ℹ️  标准岗模式页数上限 {DEFAULT_SKILLVER_MAX_PAGES}，"
-                f"已将 --pages {args.pages} 调整为 {DEFAULT_SKILLVER_MAX_PAGES}"
-            )
-            args.pages = DEFAULT_SKILLVER_MAX_PAGES
-        if args.min_details is None:
-            if args.max_details is not None:
-                args.min_details = args.max_details
-                print(
-                    f"ℹ️  标准岗将弃用别名 --max-details 视为 "
-                    f"--min-details {args.min_details}"
-                )
-            else:
-                args.min_details = DEFAULT_SKILLVER_MIN_DETAILS
-                print(f"ℹ️  标准岗默认 --min-details {args.min_details}")
-        args.min_details, clamped = clamp_skillver_min_details(args.min_details)
-        if clamped:
-            print(
-                f"ℹ️  --min-details 超过上限 "
-                f"{DEFAULT_SKILLVER_MAX_MIN_DETAILS}，已调整为 "
-                f"{args.min_details}"
-            )
-        if args.page_batch_size is None or args.page_batch_size < 1:
-            args.page_batch_size = DEFAULT_SKILLVER_PAGE_BATCH_SIZE
-        # max_details no longer hard-truncates the standard-position path
-        args.max_details = None
-
-        default_list, default_detail = default_skillver_output_paths(
-            position_binding["position_name"]
-        )
-        if not args.output and will_scrape_list:
-            args.output = default_list
-        if not args.detail_output and will_scrape_details:
-            args.detail_output = default_detail
-        slug = keyword_output_slug(position_binding["position_name"], 1)
-        if slug.startswith("01_"):
-            slug = slug[3:]
-        if not args.match_report:
-            args.match_report = os.path.join(
-                "data", "skillver", "exports", f"match_skip_{slug}.json"
-            )
-        if not args.decision_report:
-            args.decision_report = os.path.join(
-                "data", "skillver", "exports", f"decisions_{slug}.json"
-            )
-
-        skillver_seen_path = args.seen
-        try:
-            skillver_seen = load_skillver_seen(
-                skillver_seen_path,
-                catalog=catalog_rows,
-                catalog_names=set(catalog_names),
-            )
-        except (OSError, json.JSONDecodeError, ValueError, ImportError) as exc:
-            print(f"❌ 无法加载 seen: {exc}")
-            sys.exit(1)
-
-        print_resume_hint(position_binding["position_name"], args.min_details)
-
-    # 抓取前校验城市，避免无效中文名被原样作为 city 参数继续请求。
-    if will_scrape_list:
-        try:
-            resolve_city(args.city)
-        except CityResolutionError as e:
-            print(f"❌ {e}")
-            sys.exit(1)
-
-    # 去重集合（列表过滤与详情开页共用）
-    seen_ids = set()
-    if skillver_seen is not None:
-        seen_ids |= skillver_seen_detail_ids(skillver_seen)
-    seen_ids |= load_seen_encrypt_job_ids(seen_detail_roots_from_args(args))
-    if args.detail_output:
-        detail_dir = os.path.dirname(os.path.abspath(args.detail_output))
-        if detail_dir:
-            seen_ids |= load_seen_encrypt_job_ids([detail_dir])
-    if seen_ids:
-        print(f"已加载已抓详情 encrypt_job_id: {len(seen_ids)} 个（用于跳过重复详情）")
-
-    details = []
-    list_data = {"keyword": search_keyword or "", "city": "", "total": 0, "jobs": []}
-
-    # -------- 标准岗分步：drain / list-only / details-from-decisions --------
-    skillver_mode_count = sum(
-        bool(x)
-        for x in (
-            getattr(args, "drain_inventory", False),
-            getattr(args, "list_only", False),
-            getattr(args, "details_from_decisions", None),
-        )
-    )
-    if position_binding and skillver_mode_count > 1:
-        print("❌ --drain-inventory / --list-only / --details-from-decisions 只能选一个")
-        sys.exit(2)
-    if position_binding and skillver_mode_count == 0 and (
-        will_scrape_list or will_scrape_details
-    ) and not args.input:
-        print(
-            "❌ 标准岗须指定分步模式之一：\n"
-            "  --drain-inventory\n"
-            "  --list-only\n"
-            "  --details-from-decisions PATH（配合 --classify-input）\n"
-            "详见 references/classify-decisions.md 与 SKILL.md"
-        )
-        sys.exit(2)
-
-    if position_binding and args.drain_inventory:
-        if not args.detail_output:
-            _, args.detail_output = default_skillver_output_paths(
-                position_binding["position_name"]
-            )
-        if not ensure_scrape_login(args.cdp_port):
-            sys.exit(1)
-        try:
-            drain_city_fallback, _ = resolve_city(args.city)
-        except (CityResolutionError, CityAPIResponseError, OSError, ValueError):
-            drain_city_fallback = str(args.city or "").strip()
-        drained = run_skillver_drain_inventory(
-            position_binding=position_binding,
-            catalog_names=catalog_names,
-            skillver_seen=skillver_seen,
-            skillver_seen_path=skillver_seen_path,
-            detail_output=args.detail_output,
-            cdp_port=args.cdp_port,
-            fmt=args.format,
-            city_fallback=drain_city_fallback,
-        )
-        details = drained.get("details") or []
-        print(
-            f"drain-inventory 完成：目标 min-details={args.min_details}，"
-            f"本轮新增 {drained.get('details_new_this_run')}"
-        )
-        _old_state = load_task_state(position_binding["position_name"]) or {}
-        save_task_state(
-            position_binding["position_name"],
-            stage="drain",
-            city=str(args.city or "").strip(),
-            min_details=args.min_details,
-            new_details_count=int(_old_state.get("new_details_count") or 0)
-            + int(drained.get("details_new_this_run") or 0),
-        )
-        # skip legacy list/detail paths
-        will_scrape_list = False
-        will_scrape_details = False
-        args.detail = False
-
-    elif position_binding and args.list_only:
-        if not args.output:
-            args.output, _ = default_skillver_output_paths(
-                position_binding["position_name"]
-            )
-        if not ensure_scrape_login(args.cdp_port):
-            sys.exit(1)
-        classify_input_path = args.classify_input or default_classify_input_path(
-            position_binding["position_name"], args.batch_index
-        )
-        listed = run_skillver_list_only_batch(
-            position_binding=position_binding,
-            catalog_names=catalog_names,
-            skillver_seen=skillver_seen,
-            search_keyword=search_keyword,
-            city=args.city,
-            filters=filters,
-            max_pages=args.pages,
-            page_batch_size=args.page_batch_size,
-            list_start_page=args.list_start_page,
-            list_output=args.output,
-            classify_input_path=classify_input_path,
-            batch_index=args.batch_index,
-            cdp_port=args.cdp_port,
-            fmt=args.format,
-            allow_dom_fallback=args.allow_dom_fallback,
-        )
-        list_data = listed.get("list_data") or list_data
-        save_task_state(
-            position_binding["position_name"],
-            stage="list",
-            city=str(args.city or "").strip(),
-            min_details=args.min_details,
-            batch_index=int(args.batch_index or 1),
-            list_start_page=int(args.list_start_page or 1),
-            next_list_start_page=(list_data or {}).get("next_list_start_page"),
-        )
-        will_scrape_details = False
-        args.detail = False
-
-    elif position_binding and args.details_from_decisions:
-        if not args.classify_input:
-            print("❌ --details-from-decisions 需要同时提供 --classify-input")
-            sys.exit(2)
-        if not args.detail_output:
-            _, args.detail_output = default_skillver_output_paths(
-                position_binding["position_name"]
-            )
-        if not ensure_scrape_login(args.cdp_port):
-            sys.exit(1)
-        try:
-            try:
-                city_fallback_name, _city_code = resolve_city(args.city)
-            except (CityResolutionError, CityAPIResponseError, OSError, ValueError):
-                city_fallback_name = str(args.city or "").strip()
-            applied = run_skillver_details_from_decisions(
-                position_binding=position_binding,
-                catalog_names=catalog_names,
-                skillver_seen=skillver_seen,
-                skillver_seen_path=skillver_seen_path,
-                classify_input_path=args.classify_input,
-                decisions_path=args.details_from_decisions,
-                detail_output=args.detail_output,
-                cdp_port=args.cdp_port,
-                fmt=args.format,
-                match_report_path=args.match_report,
-                decision_report_path=args.decision_report,
-                city_fallback=city_fallback_name,
-            )
-        except ValueError as exc:
-            print(f"❌ {exc}")
-            sys.exit(1)
-        details = applied.get("details") or []
-        match_skips = applied.get("match_skips") or []
-        _old_state = load_task_state(position_binding["position_name"]) or {}
-        save_task_state(
-            position_binding["position_name"],
-            stage="details",
-            city=str(args.city or "").strip(),
-            min_details=args.min_details,
-            new_details_count=int(_old_state.get("new_details_count") or 0)
-            + len(details),
-        )
-        will_scrape_list = False
-        will_scrape_details = False
-        args.detail = False
-
-    elif args.input:
-        with open(args.input, encoding="utf-8") as f:
-            list_data = json.load(f)
-        print(f"从文件加载 {len(list_data.get('jobs',[]))} 条: {args.input}")
+def close_chrome_if_requested(flag):
+    if not flag:
+        return
+    profile = prepare_cdp_profile(copy_login_state=False, reset=False)
+    stopped = stop_cdp_chrome(profile["path"])
+    if stopped:
+        print(f"\n🧹 已按 --close-chrome 关闭 BOSS 专用浏览器进程：{stopped} 个")
     else:
-        if not ensure_scrape_login(args.cdp_port):
-            sys.exit(1)
-        list_data = scrape_list(
-            search_keyword, args.city, args.pages, filters, args.output,
-            cdp_port=args.cdp_port, fmt=args.format,
-            allow_dom_fallback=args.allow_dom_fallback,
-        )
-
-    # 合并外部文件
-    merged_details = None
-    if args.merge:
-        merged_jobs = merge_jobs(args.merge, list_data.get("jobs", []))
-        list_data["jobs"] = merged_jobs
-        list_data["total"] = len(merged_jobs)
-        if args.output:
-            flush_jobs(args.output, {
-                "keyword": list_data.get("keyword", ""),
-                "city": list_data.get("city", ""),
-                "filters": list_data.get("filters", {}),
-                "filter_desc": list_data.get("filter_desc", []),
-                "scraped_at": datetime.now().isoformat(),
-                "merged_from": args.merge,
-            }, merged_jobs)
-            print(f"合并结果已保存: {args.output}")
-            if args.format == "csv":
-                csv_path = args.output.rsplit(".", 1)[0] + ".csv"
-                write_csv(csv_path, merged_jobs)
-        merged_details = merge_details(args.merge, [])
-
-    # --input 补详情：非标准岗或未走分步模式时，直接按列表开详情
-    if (
-        args.detail
-        and list_data.get("jobs")
-        and not getattr(args, "drain_inventory", False)
-        and not getattr(args, "list_only", False)
-        and not getattr(args, "details_from_decisions", None)
-    ):
-        jobs_for_detail = list(list_data.get("jobs") or [])
-        if position_binding:
-            print(
-                "❌ 标准岗补详情请使用 --details-from-decisions +"
-                " --classify-input（Agent 归类），不要对 --input 直接开详情"
-            )
-            sys.exit(2)
-        if jobs_for_detail:
-            if args.input and not ensure_scrape_login(args.cdp_port):
-                sys.exit(1)
-            try:
-                detail_city_fallback, _ = resolve_city(args.city)
-            except (CityResolutionError, CityAPIResponseError, OSError, ValueError):
-                detail_city_fallback = str(
-                    list_data.get("city") or args.city or ""
-                ).strip()
-            details = scrape_details(
-                {"jobs": jobs_for_detail, "city": detail_city_fallback},
-                args.max_details,
-                args.detail_output,
-                cdp_port=args.cdp_port,
-                fmt=args.format,
-                seen_encrypt_job_ids=seen_ids,
-                title_include=title_include,
-                title_exclude=title_exclude,
-                position_binding=position_binding,
-                skillver_seen=skillver_seen,
-                skillver_seen_path=skillver_seen_path,
-                existing_details=details or None,
-                skip_headhunter_filter=bool(position_binding),
-                catalog_names=set(catalog_names) if catalog_names else None,
-                city_fallback=detail_city_fallback,
-            )
-            if position_binding and args.match_report:
-                write_match_skip_report(
-                    args.match_report,
-                    {
-                        "position": position_binding,
-                        "details_count": len(details or []),
-                        "skipped_count": len(match_skips),
-                        "skipped": match_skips,
-                    },
-                )
-        if merged_details and args.detail_output:
-            details = merge_details_from_lists(merged_details, details or [])
-            os.makedirs(os.path.dirname(args.detail_output) or ".", exist_ok=True)
-            with open(args.detail_output, "w", encoding="utf-8") as f:
-                json.dump(details, f, ensure_ascii=False, indent=2)
-            print(f"合并详情已保存: {args.detail_output}")
-            if args.format == "csv":
-                detail_csv = args.detail_output.rsplit(".", 1)[0] + ".csv"
-                write_detail_csv(detail_csv, details)
-
-    # 分析
-    if args.analysis:
-        # 如果有详情文件也加载
-        if not details:
-            details = load_existing_details(args.input, args.detail_output)
-        analyze(
-            list_data,
-            details,
-            search_keyword=search_keyword
-            or (position_binding or {}).get("position_name", "")
-            or "",
-        )
-
-    # 抓取正常结束后按需收尾（仅成功路径；异常/登录失败走 sys.exit，不会触发，保留登录态）
-    if args.close_chrome:
-        profile = prepare_cdp_profile(copy_login_state=False, reset=False)
-        stopped = stop_cdp_chrome(profile["path"])
-        if stopped:
-            print(f"\n🧹 已按 --close-chrome 关闭 BOSS 专用浏览器进程：{stopped} 个")
-        else:
-            print(f"\nℹ️  --close-chrome 未发现运行中的 BOSS 专用浏览器进程")
-
-
-if __name__ == "__main__":
-    main()
+        print("\nℹ️  --close-chrome 未发现运行中的 BOSS 专用浏览器进程")
